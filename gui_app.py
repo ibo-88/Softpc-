@@ -1,7 +1,8 @@
 # gui_app.py
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import ttk, filedialog, messagebox
+from tkinter import scrolledtext
 import asyncio
 import threading
 import os
@@ -13,6 +14,8 @@ import telegram_worker
 import parser_module
 import core_manager
 import account_tester
+import safety_manager
+import proxy_manager
 
 class TelegramManagerGUI:
     def __init__(self):
@@ -36,8 +39,10 @@ class TelegramManagerGUI:
         storage_manager.initialize_storage()
         self.load_data()
         
-        # Инициализация core manager
+        # Инициализация менеджеров
         self.core_manager = core_manager.get_core_manager(self.log)
+        self.safety_manager = safety_manager.get_safety_manager()
+        self.proxy_manager = proxy_manager.get_proxy_manager()
         
         # Создание интерфейса
         self.create_widgets()
@@ -168,55 +173,57 @@ class TelegramManagerGUI:
         self.notebook.add(parser_frame, text="Парсер")
         
         # Верхняя панель - настройки парсинга
-        top_frame = ttk.LabelFrame(parser_frame, text="Настройки парсинга", padding=10)
+        top_frame = ttk.LabelFrame(parser_frame, text="Настройки парсинга", padding=15)
         top_frame.pack(fill=tk.X, padx=10, pady=10)
         
-        # Выбор аккаунта для парсинга
-        ttk.Label(top_frame, text="Аккаунт для парсинга:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        # Строка 1: Аккаунт и тип парсинга
+        ttk.Label(top_frame, text="Аккаунт:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         self.parser_account_var = tk.StringVar()
-        self.parser_account_combo = ttk.Combobox(top_frame, textvariable=self.parser_account_var, width=30)
-        self.parser_account_combo.grid(row=0, column=1, padx=(0, 20))
+        self.parser_account_combo = ttk.Combobox(top_frame, textvariable=self.parser_account_var, width=25)
+        self.parser_account_combo.grid(row=0, column=1, padx=(0, 15), sticky=tk.W)
         
-        # Тип парсинга
-        ttk.Label(top_frame, text="Тип парсинга:").grid(row=0, column=2, sticky=tk.W, padx=(0, 10))
+        ttk.Label(top_frame, text="Тип:").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
         self.parse_type_var = tk.StringVar(value="usernames")
         parse_type_combo = ttk.Combobox(top_frame, textvariable=self.parse_type_var, 
                                       values=["usernames", "members", "multiple_usernames", "messages", "dialogs"], 
-                                      width=18, state="readonly")
-        parse_type_combo.grid(row=0, column=3)
-        
-        # Привязываем событие изменения типа парсинга
+                                      width=20, state="readonly")
+        parse_type_combo.grid(row=0, column=3, sticky=tk.W)
         parse_type_combo.bind('<<ComboboxSelected>>', self.on_parse_type_changed)
         
-        # Цель парсинга
-        self.parse_target_label = ttk.Label(top_frame, text="Цель (ссылка/username):")
-        self.parse_target_label.grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
+        # Строка 2: Цель парсинга (обычное поле)
+        self.parse_target_label = ttk.Label(top_frame, text="Цель:")
+        self.parse_target_label.grid(row=1, column=0, sticky=tk.W, pady=(10, 0), padx=(0, 5))
         self.parse_target_var = tk.StringVar()
-        self.parse_target_entry = ttk.Entry(top_frame, textvariable=self.parse_target_var, width=50)
-        self.parse_target_entry.grid(row=1, column=1, columnspan=2, sticky=tk.W, pady=(10, 0), padx=(0, 20))
+        self.parse_target_entry = ttk.Entry(top_frame, textvariable=self.parse_target_var, width=60)
+        self.parse_target_entry.grid(row=1, column=1, columnspan=3, sticky=tk.W, pady=(10, 0))
         
-        # Текстовое поле для множественного парсинга (скрыто по умолчанию)
-        self.parse_target_text = tk.Text(top_frame, height=4, width=50)
-        self.parse_target_text.grid(row=2, column=1, columnspan=2, sticky=tk.W, pady=(5, 0), padx=(0, 20))
-        self.parse_target_text.grid_remove()  # Скрываем изначально
+        # Строка 3: Текстовое поле для множественного парсинга (скрыто по умолчанию)
+        self.parse_target_text_label = ttk.Label(top_frame, text="Список чатов:")
+        self.parse_target_text = tk.Text(top_frame, height=4, width=60, bg='#404040', fg='white')
+        # Изначально скрыты
         
-        # Лимит
-        self.parse_limit_label = ttk.Label(top_frame, text="Лимит:")
-        self.parse_limit_label.grid(row=1, column=2, sticky=tk.W, pady=(10, 0), padx=(20, 10))
+        # Строка 4: Лимит и формат
+        ttk.Label(top_frame, text="Лимит:").grid(row=4, column=0, sticky=tk.W, pady=(10, 0), padx=(0, 5))
         self.parse_limit_var = tk.StringVar(value="10000")
         self.parse_limit_entry = ttk.Entry(top_frame, textvariable=self.parse_limit_var, width=10)
-        self.parse_limit_entry.grid(row=1, column=3, pady=(10, 0))
+        self.parse_limit_entry.grid(row=4, column=1, sticky=tk.W, pady=(10, 0))
         
-        # Формат экспорта
-        ttk.Label(top_frame, text="Формат экспорта:").grid(row=3, column=0, sticky=tk.W, pady=(10, 0))
+        ttk.Label(top_frame, text="Формат:").grid(row=4, column=2, sticky=tk.W, pady=(10, 0), padx=(15, 5))
         self.export_format_var = tk.StringVar(value="txt")
         format_combo = ttk.Combobox(top_frame, textvariable=self.export_format_var, 
                                   values=["txt", "csv", "json"], width=10, state="readonly")
-        format_combo.grid(row=3, column=1, sticky=tk.W, pady=(10, 0))
+        format_combo.grid(row=4, column=3, sticky=tk.W, pady=(10, 0))
         
-        # Кнопка запуска
-        ttk.Button(top_frame, text="🚀 Начать парсинг", 
-                  command=self.start_parsing).grid(row=3, column=3, pady=(10, 0))
+        # Строка 5: Кнопки управления
+        buttons_frame = ttk.Frame(top_frame)
+        buttons_frame.grid(row=5, column=0, columnspan=4, pady=(15, 0), sticky=tk.W)
+        
+        ttk.Button(buttons_frame, text="🚀 Начать парсинг", 
+                  command=self.start_parsing).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(buttons_frame, text="🛑 Остановить", 
+                  command=self.stop_parsing).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(buttons_frame, text="📁 Открыть папку экспорта", 
+                  command=self.open_export_folder).pack(side=tk.LEFT)
         
         # Средняя панель - прогресс
         progress_frame = ttk.LabelFrame(parser_frame, text="Прогресс парсинга", padding=10)
@@ -320,34 +327,71 @@ class TelegramManagerGUI:
         settings_frame = ttk.Frame(self.notebook)
         self.notebook.add(settings_frame, text="Настройки")
         
-        # Настройки прокси
-        proxy_frame = ttk.LabelFrame(settings_frame, text="Прокси", padding=10)
-        proxy_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Верхняя панель - настройки распределения
+        distribution_frame = ttk.LabelFrame(settings_frame, text="Настройки распределения", padding=10)
+        distribution_frame.pack(fill=tk.X, padx=10, pady=10)
         
-        # Список прокси
-        proxy_list_frame = ttk.Frame(proxy_frame)
-        proxy_list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        ttk.Label(distribution_frame, text="Аккаунтов на 1 прокси:").pack(side=tk.LEFT, padx=(0, 10))
+        self.accounts_per_proxy_var = tk.StringVar(value="3")
+        accounts_per_proxy_spin = tk.Spinbox(distribution_frame, from_=1, to=10, width=5, 
+                                           textvariable=self.accounts_per_proxy_var,
+                                           command=self.update_proxy_distribution)
+        accounts_per_proxy_spin.pack(side=tk.LEFT, padx=(0, 20))
         
-        self.proxy_listbox = tk.Listbox(proxy_list_frame, bg='#404040', fg='white', 
-                                       selectbackground='#606060', height=15)
-        proxy_scrollbar = ttk.Scrollbar(proxy_list_frame, orient=tk.VERTICAL, command=self.proxy_listbox.yview)
-        self.proxy_listbox.configure(yscrollcommand=proxy_scrollbar.set)
+        ttk.Button(distribution_frame, text="📊 Показать распределение", 
+                  command=self.show_proxy_distribution).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(distribution_frame, text="🔄 Обновить распределение", 
+                  command=self.update_proxy_distribution).pack(side=tk.LEFT)
         
-        self.proxy_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        proxy_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Панель прокси
+        proxy_frame = ttk.LabelFrame(settings_frame, text="Управление прокси", padding=10)
+        proxy_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
         
-        # Кнопки управления прокси
-        proxy_buttons_frame = ttk.Frame(proxy_frame)
-        proxy_buttons_frame.pack(fill=tk.X)
+        # Левая часть - список прокси
+        left_proxy_frame = ttk.Frame(proxy_frame)
+        left_proxy_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
         
-        ttk.Button(proxy_buttons_frame, text="Добавить прокси", 
-                  command=self.add_proxy).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(proxy_buttons_frame, text="Загрузить из файла", 
-                  command=self.load_proxy_file).pack(side=tk.LEFT, padx=5)
-        ttk.Button(proxy_buttons_frame, text="Проверить все", 
-                  command=self.check_proxies).pack(side=tk.LEFT, padx=5)
-        ttk.Button(proxy_buttons_frame, text="Удалить выбранные", 
-                  command=self.delete_proxy).pack(side=tk.LEFT, padx=5)
+        # Список прокси с цветовой индикацией
+        columns = ('Прокси', 'Статус', 'Страна', 'Время')
+        self.proxy_tree = ttk.Treeview(left_proxy_frame, columns=columns, show='headings', height=12)
+        
+        for col in columns:
+            self.proxy_tree.heading(col, text=col)
+            if col == 'Прокси':
+                self.proxy_tree.column(col, width=200)
+            else:
+                self.proxy_tree.column(col, width=80)
+        
+        proxy_tree_scrollbar = ttk.Scrollbar(left_proxy_frame, orient=tk.VERTICAL, command=self.proxy_tree.yview)
+        self.proxy_tree.configure(yscrollcommand=proxy_tree_scrollbar.set)
+        
+        self.proxy_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        proxy_tree_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Правая часть - управление
+        right_proxy_frame = ttk.Frame(proxy_frame)
+        right_proxy_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        ttk.Label(right_proxy_frame, text="Управление прокси:").pack(anchor=tk.W, pady=(0, 10))
+        
+        ttk.Button(right_proxy_frame, text="➕ Добавить прокси", 
+                  command=self.add_proxy).pack(fill=tk.X, pady=2)
+        ttk.Button(right_proxy_frame, text="📂 Загрузить из файла", 
+                  command=self.load_proxy_file).pack(fill=tk.X, pady=2)
+        ttk.Button(right_proxy_frame, text="🔍 Проверить все", 
+                  command=self.check_proxies).pack(fill=tk.X, pady=2)
+        ttk.Button(right_proxy_frame, text="🗑️ Удалить нерабочие", 
+                  command=self.remove_non_working_proxies).pack(fill=tk.X, pady=2)
+        ttk.Button(right_proxy_frame, text="❌ Удалить выбранные", 
+                  command=self.delete_selected_proxies).pack(fill=tk.X, pady=2)
+        
+        # Статистика
+        stats_frame = ttk.LabelFrame(right_proxy_frame, text="Статистика", padding=5)
+        stats_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        self.proxy_stats_text = tk.Text(stats_frame, height=8, width=25, bg='#404040', fg='white', 
+                                       font=('Consolas', 9))
+        self.proxy_stats_text.pack(fill=tk.BOTH, expand=True)
     
     def create_logs_tab(self):
         """Вкладка логов"""
@@ -767,37 +811,66 @@ class TelegramManagerGUI:
         parse_type = self.parse_type_var.get()
         
         if parse_type == "multiple_usernames":
-            # Показываем текстовое поле для списка чатов
+            # Скрываем обычное поле и показываем текстовое
             self.parse_target_entry.grid_remove()
-            self.parse_target_text.grid()
-            self.parse_target_label.config(text="Список чатов (по одному на строку):")
-            self.parse_limit_label.config(text="Лимит на чат:")
-            self.parse_limit_var.set("5000")
+            self.parse_target_text_label.grid(row=2, column=0, sticky=tk.NW, pady=(10, 0), padx=(0, 5))
+            self.parse_target_text.grid(row=2, column=1, columnspan=3, sticky=tk.W, pady=(10, 0))
+            
+            self.parse_target_label.config(text="Множественный парсинг:")
             
             # Добавляем подсказку в текстовое поле
             self.parse_target_text.delete(1.0, tk.END)
-            self.parse_target_text.insert(1.0, "@chat1\n@chat2\nhttps://t.me/chat3\n...")
+            self.parse_target_text.insert(1.0, "@chat1\n@chat2\nhttps://t.me/chat3\nt.me/joinchat/abc123")
+            self.parse_limit_var.set("5000")
         else:
-            # Показываем обычное поле ввода
+            # Скрываем текстовое поле и показываем обычное
+            self.parse_target_text_label.grid_remove()
             self.parse_target_text.grid_remove()
             self.parse_target_entry.grid()
             
             if parse_type == "usernames":
-                self.parse_target_label.config(text="Чат/канал для парсинга никнеймов:")
-                self.parse_limit_label.config(text="Лимит:")
+                self.parse_target_label.config(text="Чат/канал:")
                 self.parse_limit_var.set("10000")
+                self.parse_target_var.set("@example_chat")
             elif parse_type == "members":
-                self.parse_target_label.config(text="Чат/канал для парсинга участников:")
-                self.parse_limit_label.config(text="Лимит:")
+                self.parse_target_label.config(text="Чат/канал:")
                 self.parse_limit_var.set("10000")
+                self.parse_target_var.set("@example_chat")
             elif parse_type == "messages":
-                self.parse_target_label.config(text="Чат для парсинга сообщений:")
-                self.parse_limit_label.config(text="Лимит:")
+                self.parse_target_label.config(text="Чат:")
                 self.parse_limit_var.set("1000")
+                self.parse_target_var.set("@example_chat")
             elif parse_type == "dialogs":
-                self.parse_target_label.config(text="Аккаунт (игнорируется):")
-                self.parse_limit_label.config(text="Лимит:")
+                self.parse_target_label.config(text="Диалоги аккаунта:")
                 self.parse_limit_var.set("1000")
+                self.parse_target_var.set("(автоматически)")
+    
+    def stop_parsing(self):
+        """Остановка парсинга"""
+        self.parse_progress.stop()
+        self.parse_status_var.set("Парсинг остановлен")
+        self.log("🛑 Парсинг остановлен пользователем")
+    
+    def open_export_folder(self):
+        """Открытие папки с экспортированными файлами"""
+        import subprocess
+        import platform
+        
+        export_dir = os.path.join(storage_manager.DATA_DIR, "exports")
+        os.makedirs(export_dir, exist_ok=True)
+        
+        try:
+            if platform.system() == "Windows":
+                subprocess.run(["explorer", export_dir])
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.run(["open", export_dir])
+            else:  # Linux
+                subprocess.run(["xdg-open", export_dir])
+            
+            self.log(f"📁 Открыта папка: {export_dir}")
+        except Exception as e:
+            self.log(f"❌ Не удалось открыть папку: {e}")
+            messagebox.showinfo("Путь к файлам", f"Файлы сохраняются в:\n{export_dir}")
     
     def create_task(self):
         """Создание новой задачи"""
@@ -851,7 +924,7 @@ class TelegramManagerGUI:
             messagebox.showerror("Ошибка", "Задача с таким именем уже существует")
     
     def start_task(self):
-        """Запуск задачи"""
+        """Запуск задачи с проверкой безопасности"""
         selection = self.tasks_tree.selection()
         if not selection:
             messagebox.showwarning("Предупреждение", "Выберите задачу для запуска")
@@ -865,7 +938,44 @@ class TelegramManagerGUI:
             messagebox.showwarning("Предупреждение", "Задача уже выполняется")
             return
         
-        self.log(f"Запускаю задачу: {task_name}")
+        # Получаем данные задачи
+        task_data = storage_manager.get_task(task_name)
+        if not task_data:
+            messagebox.showerror("Ошибка", "Задача не найдена")
+            return
+        
+        # Проверка безопасности
+        is_safe, safety_message = self.safety_manager.validate_task_safety(task_name, task_data)
+        
+        if not is_safe:
+            messagebox.showerror("Ошибка безопасности", 
+                               f"Задача не может быть запущена:\n\n{safety_message}")
+            return
+        
+        # Показываем рекомендации для опасных задач
+        task_type = task_data.get('type', '')
+        if task_type in ['spam_dm', 'spam_dm_existing', 'spam_chats', 'spam_channels', 'spam_both']:
+            recommendations = self.safety_manager.get_recommended_settings(task_type)
+            warning = recommendations.get('warning', '')
+            
+            confirm_msg = f"Запуск задачи: {task_name}\n"
+            confirm_msg += f"Тип: {task_type}\n"
+            confirm_msg += f"Аккаунтов: {len(task_data.get('accounts', []))}\n\n"
+            confirm_msg += f"{warning}\n\n"
+            confirm_msg += "Продолжить?"
+            
+            result = messagebox.askyesno("Подтверждение запуска", confirm_msg)
+            if not result:
+                return
+        
+        self.log(f"🚀 Запускаю задачу: {task_name}")
+        self.log(f"✅ Проверка безопасности пройдена: {safety_message}")
+        
+        # Обновляем распределение прокси перед запуском
+        accounts = task_data.get('accounts', [])
+        if accounts:
+            self.proxy_manager.create_proxy_queues(accounts)
+        
         self.core_manager.execute_task_async(task_name)
         
         # Обновляем список задач через секунду
@@ -901,8 +1011,100 @@ class TelegramManagerGUI:
         item = self.tasks_tree.item(selection[0])
         task_name = item['values'][0]
         
-        # TODO: Открыть окно настроек задачи
-        self.log(f"Открываю настройки задачи: {task_name}")
+        self.open_task_settings_window(task_name)
+    
+    def open_task_settings_window(self, task_name):
+        """Открытие окна настроек задачи"""
+        task_data = storage_manager.get_task(task_name)
+        if not task_data:
+            messagebox.showerror("Ошибка", "Задача не найдена")
+            return
+        
+        # Создаем окно настроек
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title(f"Настройки задачи: {task_name}")
+        settings_window.geometry("600x500")
+        settings_window.configure(bg='#2b2b2b')
+        settings_window.transient(self.root)
+        settings_window.grab_set()
+        
+        # Основная информация
+        info_frame = ttk.LabelFrame(settings_window, text="Информация о задаче", padding=10)
+        info_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        task_type = task_data.get('type', 'Не задан')
+        task_settings = task_data.get('settings', {})
+        
+        info_text = f"Название: {task_name}\n"
+        info_text += f"Тип: {task_type}\n"
+        info_text += f"Аккаунтов: {len(task_data.get('accounts', []))}"
+        
+        ttk.Label(info_frame, text=info_text).pack(anchor=tk.W)
+        
+        # Рекомендации безопасности
+        recommendations = self.safety_manager.get_recommended_settings(task_type)
+        if recommendations:
+            safety_frame = ttk.LabelFrame(settings_window, text="Рекомендации безопасности", padding=10)
+            safety_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+            
+            safety_text = f"Макс. воркеров: {recommendations.get('max_workers', 5)}\n"
+            safety_text += f"Интервал: {recommendations.get('delay_min', 30)}-{recommendations.get('delay_max', 90)} сек\n"
+            safety_text += f"Дневной лимит: {recommendations.get('daily_limit', 50)}\n\n"
+            safety_text += f"{recommendations.get('warning', '')}"
+            
+            safety_label = ttk.Label(safety_frame, text=safety_text, wraplength=550)
+            safety_label.pack(anchor=tk.W)
+        
+        # Настройки
+        settings_frame = ttk.LabelFrame(settings_window, text="Настройки", padding=10)
+        settings_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        
+        # Воркеры
+        ttk.Label(settings_frame, text="Количество воркеров:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        workers_var = tk.StringVar(value=str(task_settings.get('concurrent_workers', 5)))
+        workers_entry = ttk.Entry(settings_frame, textvariable=workers_var, width=10)
+        workers_entry.grid(row=0, column=1, sticky=tk.W)
+        
+        # Интервал
+        ttk.Label(settings_frame, text="Интервал (мин-макс):").grid(row=1, column=0, sticky=tk.W, pady=(10, 0), padx=(0, 10))
+        interval = task_settings.get('broadcast_interval', [30, 90])
+        interval_var = tk.StringVar(value=f"{interval[0]}-{interval[1]}")
+        interval_entry = ttk.Entry(settings_frame, textvariable=interval_var, width=15)
+        interval_entry.grid(row=1, column=1, sticky=tk.W, pady=(10, 0))
+        
+        # 2FA пароль
+        ttk.Label(settings_frame, text="Пароль 2FA:").grid(row=2, column=0, sticky=tk.W, pady=(10, 0), padx=(0, 10))
+        twofa_var = tk.StringVar(value=task_settings.get('two_fa_password', ''))
+        twofa_entry = ttk.Entry(settings_frame, textvariable=twofa_var, width=20, show='*')
+        twofa_entry.grid(row=2, column=1, sticky=tk.W, pady=(10, 0))
+        
+        # Кнопки
+        buttons_frame = ttk.Frame(settings_window)
+        buttons_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        def save_settings():
+            try:
+                # Сохраняем настройки
+                workers = int(workers_var.get())
+                interval_str = interval_var.get()
+                min_val, max_val = map(int, interval_str.split('-'))
+                
+                tasks = storage_manager.load_tasks()
+                if task_name in tasks:
+                    tasks[task_name]['settings']['concurrent_workers'] = workers
+                    tasks[task_name]['settings']['broadcast_interval'] = [min_val, max_val]
+                    tasks[task_name]['settings']['two_fa_password'] = twofa_var.get()
+                    storage_manager.save_tasks(tasks)
+                    
+                    self.log(f"💾 Настройки задачи {task_name} сохранены")
+                    self.refresh_tasks()
+                    settings_window.destroy()
+                
+            except ValueError:
+                messagebox.showerror("Ошибка", "Проверьте правильность введенных данных")
+        
+        ttk.Button(buttons_frame, text="💾 Сохранить", command=save_settings).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(buttons_frame, text="❌ Отмена", command=settings_window.destroy).pack(side=tk.LEFT)
     
     def delete_task(self):
         """Удаление задачи"""
@@ -951,13 +1153,191 @@ class TelegramManagerGUI:
     
     def refresh_proxy_list(self):
         """Обновление списка прокси"""
-        self.proxy_listbox.delete(0, tk.END)
+        # Очищаем дерево
+        for item in self.proxy_tree.get_children():
+            self.proxy_tree.delete(item)
         
         settings = storage_manager.load_settings()
         proxies = settings.get('proxies', [])
+        proxy_statuses = settings.get('proxy_statuses', {})
         
         for proxy in proxies:
-            self.proxy_listbox.insert(tk.END, proxy)
+            status_info = proxy_statuses.get(proxy, {})
+            status = status_info.get('status', 'Не проверен')
+            country = status_info.get('country', 'N/A')
+            response_time = status_info.get('response_time', 0)
+            
+            # Цветовая индикация
+            tags = []
+            if status == 'working':
+                tags.append('working')
+            elif status == 'not_working':
+                tags.append('not_working')
+            
+            time_str = f"{response_time}s" if response_time > 0 else "N/A"
+            
+            self.proxy_tree.insert('', tk.END, values=(proxy, status, country, time_str), tags=tags)
+        
+        # Настраиваем цвета
+        self.proxy_tree.tag_configure('working', background='#2d5a2d')
+        self.proxy_tree.tag_configure('not_working', background='#5a2d2d')
+        
+        # Обновляем статистику
+        self.update_proxy_stats()
+    
+    def update_proxy_stats(self):
+        """Обновление статистики прокси"""
+        stats = self.proxy_manager.get_proxy_statistics()
+        
+        stats_text = f"📊 Всего прокси: {stats['total_proxies']}\n"
+        stats_text += f"✅ Рабочих: {stats['working_proxies']}\n"
+        stats_text += f"❌ Нерабочих: {stats['not_working_proxies']}\n"
+        stats_text += f"❔ Не проверено: {stats['untested_proxies']}\n\n"
+        stats_text += f"⚙️ Аккаунтов на прокси: {stats['accounts_per_proxy']}\n\n"
+        
+        if stats['distribution']:
+            stats_text += "📋 Распределение:\n"
+            for proxy, accounts in list(stats['distribution'].items())[:3]:
+                proxy_short = f"{proxy.split(':')[0]}:{proxy.split(':')[1]}"
+                stats_text += f"{proxy_short}: {len(accounts)} акк.\n"
+            if len(stats['distribution']) > 3:
+                stats_text += f"... и еще {len(stats['distribution']) - 3}\n"
+        
+        self.proxy_stats_text.delete(1.0, tk.END)
+        self.proxy_stats_text.insert(1.0, stats_text)
+    
+    def update_proxy_distribution(self):
+        """Обновление распределения аккаунтов по прокси"""
+        try:
+            accounts_per_proxy = int(self.accounts_per_proxy_var.get())
+            self.proxy_manager.set_accounts_per_proxy(accounts_per_proxy)
+            
+            # Создаем новое распределение
+            accounts = storage_manager.list_accounts()
+            if accounts:
+                proxy_queues = self.proxy_manager.create_proxy_queues(accounts)
+                self.log(f"🔄 Обновлено распределение: {accounts_per_proxy} аккаунтов на прокси")
+                self.update_proxy_stats()
+            
+        except ValueError:
+            messagebox.showerror("Ошибка", "Количество аккаунтов должно быть числом от 1 до 10")
+    
+    def show_proxy_distribution(self):
+        """Показать подробное распределение прокси"""
+        stats = self.proxy_manager.get_proxy_statistics()
+        
+        if not stats['distribution']:
+            messagebox.showinfo("Распределение", "Нет активного распределения аккаунтов по прокси")
+            return
+        
+        distribution_text = "📊 Распределение аккаунтов по прокси:\n\n"
+        
+        for proxy, accounts in stats['distribution'].items():
+            proxy_short = f"{proxy.split(':')[0]}:{proxy.split(':')[1]}"
+            distribution_text += f"🌐 {proxy_short}:\n"
+            for account in accounts:
+                distribution_text += f"  • {account}\n"
+            distribution_text += "\n"
+        
+        # Создаем окно для показа распределения
+        distribution_window = tk.Toplevel(self.root)
+        distribution_window.title("Распределение прокси")
+        distribution_window.geometry("500x400")
+        distribution_window.configure(bg='#2b2b2b')
+        
+        text_widget = scrolledtext.ScrolledText(distribution_window, bg='#404040', fg='white', 
+                                              font=('Consolas', 10), wrap=tk.WORD)
+        text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        text_widget.insert(1.0, distribution_text)
+        text_widget.config(state=tk.DISABLED)
+    
+    def add_proxy(self):
+        """Добавление прокси вручную"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Добавить прокси")
+        dialog.geometry("400x200")
+        dialog.configure(bg='#2b2b2b')
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text="Формат: ip:port:username:password").pack(pady=10)
+        
+        entry_var = tk.StringVar()
+        entry = ttk.Entry(dialog, textvariable=entry_var, width=40)
+        entry.pack(pady=10)
+        entry.focus()
+        
+        def add_proxy_action():
+            proxy_str = entry_var.get().strip()
+            if not proxy_str:
+                return
+            
+            # Валидация формата
+            parts = proxy_str.split(':')
+            if len(parts) != 4:
+                messagebox.showerror("Ошибка", "Неверный формат прокси")
+                return
+            
+            try:
+                int(parts[1])  # Проверяем порт
+            except ValueError:
+                messagebox.showerror("Ошибка", "Порт должен быть числом")
+                return
+            
+            # Добавляем прокси
+            settings = storage_manager.load_settings()
+            if proxy_str not in settings.get('proxies', []):
+                settings.setdefault('proxies', []).append(proxy_str)
+                storage_manager.save_settings(settings)
+                self.log(f"➕ Добавлен прокси: {parts[0]}:{parts[1]}")
+                self.refresh_proxy_list()
+                dialog.destroy()
+            else:
+                messagebox.showwarning("Предупреждение", "Такой прокси уже существует")
+        
+        ttk.Button(dialog, text="Добавить", command=add_proxy_action).pack(pady=10)
+        ttk.Button(dialog, text="Отмена", command=dialog.destroy).pack()
+        
+        # Обработка Enter
+        entry.bind('<Return>', lambda e: add_proxy_action())
+    
+    def remove_non_working_proxies(self):
+        """Удаление всех нерабочих прокси"""
+        removed_count = self.proxy_manager.remove_non_working_proxies()
+        
+        if removed_count > 0:
+            self.log(f"🗑️ Удалено {removed_count} нерабочих прокси")
+            self.refresh_proxy_list()
+            messagebox.showinfo("Успех", f"Удалено {removed_count} нерабочих прокси")
+        else:
+            messagebox.showinfo("Информация", "Нет нерабочих прокси для удаления")
+    
+    def delete_selected_proxies(self):
+        """Удаление выбранных прокси"""
+        selection = self.proxy_tree.selection()
+        if not selection:
+            messagebox.showwarning("Предупреждение", "Выберите прокси для удаления")
+            return
+        
+        proxies_to_delete = []
+        for item in selection:
+            values = self.proxy_tree.item(item)['values']
+            proxies_to_delete.append(values[0])
+        
+        result = messagebox.askyesno("Подтверждение", 
+                                   f"Удалить {len(proxies_to_delete)} выбранных прокси?")
+        if result:
+            settings = storage_manager.load_settings()
+            for proxy in proxies_to_delete:
+                if proxy in settings.get('proxies', []):
+                    settings['proxies'].remove(proxy)
+                # Удаляем статус
+                if proxy in settings.get('proxy_statuses', {}):
+                    del settings['proxy_statuses'][proxy]
+            
+            storage_manager.save_settings(settings)
+            self.log(f"🗑️ Удалено {len(proxies_to_delete)} прокси")
+            self.refresh_proxy_list()
     
     def refresh_export_files(self):
         """Обновление списка экспортированных файлов"""
@@ -987,7 +1367,7 @@ class TelegramManagerGUI:
             self.log(f"Ошибка обновления экспортированных файлов: {e}")
     
     def check_proxies(self):
-        """Проверка прокси"""
+        """Проверка прокси с использованием ProxyManager"""
         settings = storage_manager.load_settings()
         proxies = settings.get('proxies', [])
         
@@ -1006,41 +1386,28 @@ class TelegramManagerGUI:
         def check_all_proxies():
             async def _check_proxies():
                 try:
-                    tester = account_tester.AccountTester(
-                        lambda msg: asyncio.create_task(self._async_log(msg))
-                    )
+                    async def progress_callback(msg):
+                        await self._async_log(msg)
                     
-                    proxy_statuses = {}
-                    semaphore = asyncio.Semaphore(10)  # Ограничиваем параллельность
-                    
-                    async def check_single_proxy(proxy_str):
-                        async with semaphore:
-                            result = await tester.test_proxy_connection(proxy_str)
-                            proxy_statuses[proxy_str] = {
-                                'status': 'working' if result['success'] else 'not_working',
-                                'country': 'N/A',  # Можно добавить определение страны
-                                'response_time': result.get('response_time', 0),
-                                'error': result.get('error')
-                            }
-                            
-                            status_symbol = "✅" if result['success'] else "❌"
-                            await self._async_log(f"{status_symbol} {proxy_str.split(':')[0]}:{proxy_str.split(':')[1]}")
-                    
-                    # Проверяем все прокси параллельно
-                    tasks = [check_single_proxy(proxy) for proxy in proxies]
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                    
-                    # Сохраняем результаты
-                    storage_manager.save_proxy_statuses(proxy_statuses)
-                    
-                    # Статистика
-                    working = sum(1 for status in proxy_statuses.values() if status['status'] == 'working')
-                    not_working = len(proxy_statuses) - working
-                    
-                    await self._async_log(f"📊 Проверка завершена: {working} работает, {not_working} не работает")
+                    # Используем новый ProxyManager
+                    results = await self.proxy_manager.test_all_proxies(progress_callback)
                     
                     # Обновляем интерфейс
                     self.root.after(0, self.refresh_proxy_list)
+                    
+                    # Показываем результаты
+                    working_count = len(results['working'])
+                    not_working_count = len(results['not_working'])
+                    
+                    result_msg = f"📊 Проверка завершена:\n\n"
+                    result_msg += f"✅ Рабочих прокси: {working_count}\n"
+                    result_msg += f"❌ Нерабочих прокси: {not_working_count}\n\n"
+                    
+                    if not_working_count > 0:
+                        result_msg += "Удалить нерабочие прокси?"
+                        self.root.after(0, lambda: self._show_proxy_results(result_msg, not_working_count > 0))
+                    else:
+                        self.root.after(0, lambda: messagebox.showinfo("Результат", result_msg))
                     
                 except Exception as e:
                     await self._async_log(f"❌ Критическая ошибка проверки прокси: {e}")
@@ -1051,6 +1418,15 @@ class TelegramManagerGUI:
         
         thread = threading.Thread(target=check_all_proxies)
         thread.start()
+    
+    def _show_proxy_results(self, message, offer_delete):
+        """Показ результатов проверки прокси"""
+        if offer_delete:
+            result = messagebox.askyesno("Результат проверки", message)
+            if result:
+                self.remove_non_working_proxies()
+        else:
+            messagebox.showinfo("Результат проверки", message)
     
     async def _async_log(self, message):
         """Асинхронное логирование"""

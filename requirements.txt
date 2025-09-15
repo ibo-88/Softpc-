@@ -4,10 +4,7 @@ python-telegram-bot==21.0.1
 Telethon==1.40.0
 pysocks
 
-# GUI и парсинг зависимости
-tkinter
-asyncio
-threading
-datetime
-csv
+# Дополнительные зависимости для экспорта
 openpyxl
+
+# Примечание: tkinter, asyncio, threading, datetime, csv входят в стандартную библиотеку Python
