@@ -1,0 +1,16 @@
+{
+    "api_id": 2040,
+    "app_id": 2040,
+    "api_hash": "b18441a1ff607e10a989891a5462e627",
+    "app_hash": "b18441a1ff607e10a989891a5462e627",
+    "device_model": "SM-G973F",
+    "device": "ABCDE-123",
+    "system_version": "Android 11",
+    "sdk": "Android 11",
+    "app_version": "8.9.2 x64",
+    "lang_code": "en",
+    "lang_pack": "tdesktop",
+    "system_lang_code": "en-US",
+    "system_lang_pack": "en-US",
+    "twoFA": null
+}

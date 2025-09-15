@@ -10,7 +10,8 @@ from telethon import TelegramClient, events
 from telethon.tl import functions
 from telethon.tl.functions.photos import UploadProfilePhotoRequest, DeletePhotosRequest
 from telethon.tl.functions.account import UpdateProfileRequest, UpdatePersonalChannelRequest
-from telethon.tl.functions.channels import CreateChannelRequest, UpdateUsernameRequest, EditPhotoRequest, JoinChannelRequest
+from telethon.tl.functions.channels import CreateChannelRequest, UpdateUsernameRequest, EditPhotoRequest, JoinChannelRequest, EditAboutRequest
+from telethon.tl.functions.messages import SendMessageRequest, ForwardMessagesRequest
 from telethon.tl.functions.messages import ImportChatInviteRequest
 from telethon.errors import SessionPasswordNeededError, FloodWaitError, RPCError
 from telethon.errors.rpcerrorlist import (
@@ -22,6 +23,7 @@ from telethon.errors.rpcerrorlist import (
 )
 from telethon.tl.types import Chat, Channel
 import storage_manager
+import autoreg_manager
 
 async def cancellable_sleep(seconds, cancel_event):
     try:
@@ -249,6 +251,24 @@ class TelethonWorker:
                     except Exception as e: status += f" | ❌ Ошибка смены фамилии: {e}"
                 else: status += " | ⚠️ Файл lastnames.txt для задачи пуст"
                 await self.callback(f"{self.session_name}:{status}")
+    
+    async def task_change_bio(self):
+        """Смена описания профиля"""
+        async with self.semaphore:
+            if self.cancel_event.is_set(): return
+            await self.callback(f"{self.session_name}: 📝 Смена описания профиля...")
+            
+            bios = storage_manager.read_task_text_file_lines(self.task_name, 'bios')
+            if not bios:
+                await self.callback(f"{self.session_name}: ⚠️ Файл bios.txt пуст")
+                return
+            
+            try:
+                new_bio = random.choice(bios)
+                await self.client(UpdateProfileRequest(about=new_bio))
+                await self.callback(f"{self.session_name}: ✅ Описание изменено на: '{new_bio[:50]}...'")
+            except Exception as e:
+                await self.callback(f"{self.session_name}: ❌ Ошибка смены описания: {e}")
         
     async def task_delete_lastnames(self):
         async with self.semaphore:
@@ -354,6 +374,70 @@ class TelethonWorker:
             except Exception as e:
                 status += f" | ❌ Ошибка пересылки поста: {e}"
                 await self.callback(f"{self.session_name}:{status}")
+    
+    async def task_update_channel_design(self):
+        """Обновление оформления каналов"""
+        async with self.semaphore:
+            if self.cancel_event.is_set(): return
+            await self.callback(f"{self.session_name}: 🎨 Обновление оформления каналов...")
+            
+            # Получаем все каналы пользователя
+            dialogs = await self.client.get_dialogs()
+            my_channels = []
+            
+            for dialog in dialogs:
+                if hasattr(dialog.entity, 'creator') and dialog.entity.creator:
+                    # Это наш канал
+                    my_channels.append(dialog.entity)
+            
+            if not my_channels:
+                await self.callback(f"{self.session_name}: ⚠️ У вас нет каналов для обновления")
+                return
+            
+            channel_names = storage_manager.read_task_text_file_lines(self.task_name, 'channel_names')
+            channel_descriptions = storage_manager.read_task_text_file_lines(self.task_name, 'channel_descriptions')
+            
+            updated_count = 0
+            
+            for channel in my_channels:
+                if self.cancel_event.is_set():
+                    break
+                
+                try:
+                    # Обновляем название канала
+                    if channel_names:
+                        new_title = random.choice(channel_names)
+                        await self.client.edit_admin(channel, 'me', title=new_title)
+                        await self.callback(f"{self.session_name}: 📝 {channel.title} → название: {new_title}")
+                    
+                    # Обновляем описание
+                    if channel_descriptions:
+                        new_description = random.choice(channel_descriptions)
+                        await self.client(EditAboutRequest(channel, new_description))
+                        await self.callback(f"{self.session_name}: 📄 {channel.title} → описание обновлено")
+                    
+                    # Обновляем аватар канала
+                    channel_avatars_dir = storage_manager.get_task_file_path(self.task_name, 'channel_avatars')
+                    if os.path.exists(channel_avatars_dir):
+                        images = [f for f in os.listdir(channel_avatars_dir) 
+                                if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+                        if images:
+                            avatar_path = os.path.join(channel_avatars_dir, random.choice(images))
+                            await self.client(EditPhotoRequest(
+                                channel=channel,
+                                photo=await self.client.upload_file(avatar_path)
+                            ))
+                            await self.callback(f"{self.session_name}: 🖼️ {channel.title} → аватар обновлен")
+                    
+                    updated_count += 1
+                    
+                    # Пауза между обновлениями каналов
+                    await asyncio.sleep(random.randint(5, 15))
+                    
+                except Exception as e:
+                    await self.callback(f"{self.session_name}: ❌ Ошибка обновления {channel.title}: {e}")
+            
+            await self.callback(f"{self.session_name}: ✅ Обновлено каналов: {updated_count}")
 
     async def task_delete_avatars(self):
         async with self.semaphore:
@@ -531,6 +615,245 @@ class TelethonWorker:
                 await cancellable_sleep(cycle_delay, self.cancel_event)
                 
         await self.callback(f"{self.session_name}:🛑 Авторассылка остановлена.")
+    
+    async def task_advanced_spam(self):
+        """Расширенный спам с различными типами сообщений и целей"""
+        settings = self.task_settings
+        spam_type = settings.get('spam_type', 'text')
+        target_type = settings.get('spam_target_type', 'chats')
+        delay_min = settings.get('spam_delay_min', 30)
+        delay_max = settings.get('spam_delay_max', 90)
+        
+        await self.callback(f"{self.session_name}: 🚀 Начинаю спам ({spam_type} → {target_type})")
+        
+        # Загружаем контент для спама
+        messages = []
+        stickers = []
+        forward_data = None
+        
+        if spam_type in ['text', 'mixed']:
+            messages = storage_manager.read_task_multiline_messages(self.task_name, 'messages')
+            if not messages:
+                await self.callback(f"{self.session_name}: ❌ Нет сообщений для спама")
+                return
+        
+        if spam_type in ['sticker', 'mixed']:
+            sticker_list = storage_manager.read_task_text_file_lines(self.task_name, 'stickers')
+            if sticker_list:
+                # Предполагаем, что в файле ID стикеров или файлы стикеров
+                stickers = sticker_list
+        
+        if spam_type == 'forward':
+            forward_messages = storage_manager.read_task_text_file_lines(self.task_name, 'forward_messages')
+            if forward_messages and forward_messages[0]:
+                # Формат: channel_id:message_id
+                try:
+                    parts = forward_messages[0].split(':')
+                    forward_data = {'channel_id': int(parts[0]), 'message_id': int(parts[1])}
+                except:
+                    await self.callback(f"{self.session_name}: ❌ Неверный формат пересылаемого сообщения")
+                    return
+        
+        while not self.cancel_event.is_set():
+            await self.callback(f"{self.session_name}: 🔄 Новый цикл спама...")
+            
+            # Получаем целевые диалоги
+            targets = await self._get_spam_targets(target_type)
+            
+            if not targets:
+                await self.callback(f"{self.session_name}: ❌ Нет доступных целей для спама")
+                break
+            
+            random.shuffle(targets)
+            await self.callback(f"{self.session_name}: 🎯 Найдено {len(targets)} целей")
+            
+            for i, target in enumerate(targets):
+                if self.cancel_event.is_set():
+                    break
+                
+                try:
+                    # Выбираем тип сообщения
+                    current_spam_type = spam_type
+                    if spam_type == 'mixed':
+                        current_spam_type = random.choice(['text', 'sticker'] if stickers else ['text'])
+                    
+                    success = False
+                    
+                    if current_spam_type == 'text' and messages:
+                        message = random.choice(messages)
+                        await self.client.send_message(target['entity'], message)
+                        success = True
+                        content_preview = message[:30] + "..." if len(message) > 30 else message
+                        
+                    elif current_spam_type == 'sticker' and stickers:
+                        sticker = random.choice(stickers)
+                        try:
+                            # Попробуем отправить как файл стикера
+                            await self.client.send_file(target['entity'], sticker)
+                            success = True
+                            content_preview = f"стикер: {sticker}"
+                        except:
+                            # Если не получилось, отправим как текст
+                            await self.client.send_message(target['entity'], sticker)
+                            success = True
+                            content_preview = sticker
+                    
+                    elif current_spam_type == 'forward' and forward_data:
+                        await self.client.forward_messages(
+                            target['entity'],
+                            forward_data['message_id'],
+                            forward_data['channel_id']
+                        )
+                        success = True
+                        content_preview = "пересылка"
+                    
+                    if success:
+                        await self.callback(
+                            f"{self.session_name}: ✅ [{i+1}/{len(targets)}] {target['title'][:20]} → {content_preview}"
+                        )
+                        
+                        # Проверяем, не удалилось ли сообщение (попали в ЧС)
+                        await asyncio.sleep(2)
+                        
+                        # Задержка между сообщениями
+                        delay = random.randint(delay_min, delay_max)
+                        await self.callback(f"{self.session_name}: ⏳ Пауза {delay}с...")
+                        await cancellable_sleep(delay, self.cancel_event)
+                
+                except (ChatWriteForbiddenError, UserBannedInChannelError) as e:
+                    await self.callback(f"{self.session_name}: 🚫 {target['title'][:20]} → заблокирован")
+                    # Добавляем в ЧС
+                    await self._add_to_blacklist(target['entity'].id)
+                    
+                except (SlowModeWaitError, FloodWaitError) as e:
+                    await self.callback(f"{self.session_name}: ⏳ Флуд-контроль: {e.seconds}с")
+                    await cancellable_sleep(e.seconds, self.cancel_event)
+                    
+                except Exception as e:
+                    await self.callback(f"{self.session_name}: ❌ {target['title'][:20]} → {type(e).__name__}")
+            
+            # Пауза между циклами
+            if not self.cancel_event.is_set():
+                cycle_delay = 300  # 5 минут
+                await self.callback(f"{self.session_name}: 🏁 Цикл завершен, пауза {cycle_delay//60} мин...")
+                await cancellable_sleep(cycle_delay, self.cancel_event)
+        
+        await self.callback(f"{self.session_name}: 🛑 Спам остановлен")
+    
+    async def task_dm_spam(self):
+        """Спам по личным сообщениям"""
+        settings = self.task_settings
+        use_existing_only = settings.get('use_existing_dialogs_only', False)
+        
+        await self.callback(f"{self.session_name}: 📨 Начинаю спам по ЛС...")
+        
+        messages = storage_manager.read_task_multiline_messages(self.task_name, 'messages')
+        if not messages:
+            await self.callback(f"{self.session_name}: ❌ Нет сообщений для спама")
+            return
+        
+        # Получаем список пользователей для спама
+        if use_existing_only:
+            # Берем только существующие диалоги с пользователями
+            dialogs = await self.client.get_dialogs()
+            targets = []
+            for dialog in dialogs:
+                if hasattr(dialog.entity, 'bot') and not dialog.entity.bot:
+                    # Это пользователь, не бот
+                    targets.append({
+                        'entity': dialog.entity,
+                        'title': f"{dialog.entity.first_name or ''} {dialog.entity.last_name or ''}".strip(),
+                        'has_messages': True
+                    })
+        else:
+            # Берем пользователей из файла spam_targets.txt
+            user_targets = storage_manager.read_task_text_file_lines(self.task_name, 'spam_targets')
+            if not user_targets:
+                await self.callback(f"{self.session_name}: ❌ Нет целей в spam_targets.txt")
+                return
+            
+            targets = []
+            for user_target in user_targets:
+                try:
+                    user_entity = await self.client.get_entity(user_target)
+                    if hasattr(user_entity, 'bot') and not user_entity.bot:
+                        targets.append({
+                            'entity': user_entity,
+                            'title': f"{user_entity.first_name or ''} {user_entity.last_name or ''}".strip(),
+                            'has_messages': False
+                        })
+                except Exception as e:
+                    await self.callback(f"{self.session_name}: ⚠️ Не удалось найти: {user_target}")
+        
+        if not targets:
+            await self.callback(f"{self.session_name}: ❌ Нет доступных пользователей для спама")
+            return
+        
+        random.shuffle(targets)
+        await self.callback(f"{self.session_name}: 👥 Найдено {len(targets)} пользователей")
+        
+        sent_count = 0
+        for i, target in enumerate(targets):
+            if self.cancel_event.is_set():
+                break
+            
+            try:
+                message = random.choice(messages)
+                await self.client.send_message(target['entity'], message)
+                sent_count += 1
+                
+                await self.callback(
+                    f"{self.session_name}: ✅ [{i+1}/{len(targets)}] {target['title'][:20]} → отправлено"
+                )
+                
+                # Большая задержка для ЛС (чтобы не получить бан)
+                delay = random.randint(60, 120)  # 1-2 минуты
+                await self.callback(f"{self.session_name}: ⏳ Пауза {delay}с...")
+                await cancellable_sleep(delay, self.cancel_event)
+                
+            except Exception as e:
+                await self.callback(f"{self.session_name}: ❌ {target['title'][:20]} → {type(e).__name__}")
+        
+        await self.callback(f"{self.session_name}: 🏁 Спам по ЛС завершен. Отправлено: {sent_count}")
+    
+    async def _get_spam_targets(self, target_type):
+        """Получение целей для спама"""
+        dialogs = await self.client.get_dialogs(limit=None)
+        targets = []
+        
+        global_settings = storage_manager.load_settings()
+        blacklist = set(global_settings.get('blacklist', []))
+        
+        for dialog in dialogs:
+            if dialog.entity.id in blacklist:
+                continue
+            
+            if target_type == 'chats':
+                # Только группы и супергруппы
+                if hasattr(dialog.entity, 'megagroup') and dialog.entity.megagroup:
+                    targets.append({'entity': dialog.entity, 'title': dialog.title})
+                elif hasattr(dialog.entity, 'broadcast') and not dialog.entity.broadcast:
+                    targets.append({'entity': dialog.entity, 'title': dialog.title})
+            
+            elif target_type == 'channels':
+                # Только каналы
+                if hasattr(dialog.entity, 'broadcast') and dialog.entity.broadcast:
+                    targets.append({'entity': dialog.entity, 'title': dialog.title})
+            
+            elif target_type == 'both':
+                # И чаты, и каналы
+                if not hasattr(dialog.entity, 'bot'):  # Исключаем ботов
+                    targets.append({'entity': dialog.entity, 'title': dialog.title})
+        
+        return targets
+    
+    async def _add_to_blacklist(self, entity_id):
+        """Добавление в черный список"""
+        async with self.settings_lock:
+            settings = storage_manager.load_settings()
+            if entity_id not in settings.get('blacklist', []):
+                settings.setdefault('blacklist', []).append(entity_id)
+                storage_manager.save_settings(settings)
 
     async def task_set_2fa(self, password):
         async with self.semaphore:
@@ -700,3 +1023,149 @@ class TelethonWorker:
             await self.callback(f"{self.session_name}:🎉 Зачистка аккаунта успешно завершена.")
         except Exception as e:
             await self.callback(f"{self.session_name}:❌ Критическая ошибка во время зачистки: {e}")
+    
+    async def task_autoreg_warmup(self):
+        """Прогрев авторег аккаунта"""
+        await self.callback(f"{self.session_name}:🔥 Начинаю прогрев авторег аккаунта...")
+        
+        autoreg_mgr = autoreg_manager.get_autoreg_manager(self.callback)
+        
+        # Определяем возраст аккаунта
+        account_age = autoreg_mgr.detect_account_age(self.session_name)
+        await self.callback(f"{self.session_name}:📅 Возраст аккаунта: {account_age}")
+        
+        # Получаем рекомендации
+        recommendations = autoreg_mgr.get_autoreg_recommendations(account_age)
+        await self.callback(f"{self.session_name}:📋 Риск: {recommendations['risk']}")
+        
+        # Выполняем прогрев
+        success = await autoreg_mgr.warmup_account(self.session_name, self.proxy_queue)
+        
+        if success:
+            await self.callback(f"{self.session_name}:✅ Прогрев завершен успешно")
+        else:
+            await self.callback(f"{self.session_name}:❌ Ошибка прогрева")
+    
+    async def task_autoreg_gentle_join(self):
+        """Мягкое вступление в чаты для авторег аккаунтов"""
+        await self.callback(f"{self.session_name}:🌱 Мягкое вступление в чаты...")
+        
+        # Загружаем список чатов
+        chats = storage_manager.read_task_text_file_lines(self.task_name, 'chats')
+        if not chats:
+            await self.callback(f"{self.session_name}:❌ Файл chats.txt пуст")
+            return
+        
+        autoreg_mgr = autoreg_manager.get_autoreg_manager(self.callback)
+        
+        # Проверяем статус аккаунта для этой задачи
+        can_use, status_msg, settings = autoreg_mgr.get_account_status_for_task(
+            self.session_name, "join_chats"
+        )
+        
+        if not can_use:
+            await self.callback(f"{self.session_name}:🚫 {status_msg}")
+            return
+        
+        await self.callback(f"{self.session_name}:✅ {status_msg}")
+        
+        # Выполняем мягкое вступление
+        joined_count = await autoreg_mgr.gentle_join_chats(self.client, chats, self.session_name)
+        await self.callback(f"{self.session_name}:🏁 Мягкое вступление завершено: {joined_count} чатов")
+    
+    async def task_autoreg_gentle_spam(self):
+        """Мягкий спам для авторег аккаунтов"""
+        await self.callback(f"{self.session_name}:🌿 Мягкий спам для авторег аккаунта...")
+        
+        # Загружаем сообщения
+        messages = storage_manager.read_task_multiline_messages(self.task_name, 'messages')
+        if not messages:
+            await self.callback(f"{self.session_name}:❌ Файл messages.txt пуст")
+            return
+        
+        autoreg_mgr = autoreg_manager.get_autoreg_manager(self.callback)
+        
+        # Определяем тип спама из настроек задачи
+        spam_target_type = self.task_settings.get('spam_target_type', 'chats')
+        task_type = f"spam_{spam_target_type}"
+        
+        # Проверяем статус аккаунта
+        can_use, status_msg, settings = autoreg_mgr.get_account_status_for_task(
+            self.session_name, task_type
+        )
+        
+        if not can_use:
+            await self.callback(f"{self.session_name}:🚫 {status_msg}")
+            return
+        
+        await self.callback(f"{self.session_name}:✅ {status_msg}")
+        
+        # Получаем цели для спама
+        targets = await self._get_spam_targets(spam_target_type)
+        if not targets:
+            await self.callback(f"{self.session_name}:❌ Нет доступных целей")
+            return
+        
+        # Выполняем мягкий спам
+        sent_count, error_count = await autoreg_mgr.gentle_spam(
+            self.client, targets, messages, self.session_name, task_type
+        )
+        
+        await self.callback(f"{self.session_name}:🏁 Мягкий спам завершен: {sent_count} отправлено, {error_count} ошибок")
+    
+    async def task_autoreg_setup_profile(self):
+        """Настройка профиля для авторег аккаунта"""
+        await self.callback(f"{self.session_name}:👤 Настройка профиля авторег аккаунта...")
+        
+        autoreg_mgr = autoreg_manager.get_autoreg_manager(self.callback)
+        account_age = autoreg_mgr.detect_account_age(self.session_name)
+        
+        await self.callback(f"{self.session_name}:📅 Возраст аккаунта: {account_age}")
+        
+        # Постепенная настройка профиля
+        try:
+            # 1. Сначала имя (самое безопасное)
+            names = storage_manager.read_task_text_file_lines(self.task_name, 'names')
+            if names:
+                new_name = random.choice(names)
+                await self.client(UpdateProfileRequest(first_name=new_name))
+                await self.callback(f"{self.session_name}:👤 Имя установлено: {new_name}")
+                
+                # Пауза после смены имени
+                await asyncio.sleep(random.randint(60, 120))
+            
+            # 2. Потом фамилия
+            lastnames = storage_manager.read_task_text_file_lines(self.task_name, 'lastnames')
+            if lastnames:
+                new_lastname = random.choice(lastnames)
+                await self.client(UpdateProfileRequest(last_name=new_lastname))
+                await self.callback(f"{self.session_name}:📜 Фамилия установлена: {new_lastname}")
+                
+                # Пауза после смены фамилии
+                await asyncio.sleep(random.randint(60, 120))
+            
+            # 3. Описание (только для не свежих аккаунтов)
+            if account_age != "fresh":
+                bios = storage_manager.read_task_text_file_lines(self.task_name, 'bios')
+                if bios:
+                    new_bio = random.choice(bios)
+                    await self.client(UpdateProfileRequest(about=new_bio))
+                    await self.callback(f"{self.session_name}:📝 Описание установлено: {new_bio[:30]}...")
+                    
+                    # Пауза после смены описания
+                    await asyncio.sleep(random.randint(90, 180))
+            
+            # 4. Аватар (только для молодых и зрелых аккаунтов)
+            if account_age in ["young", "mature"]:
+                avatars_dir = storage_manager.get_task_file_path(self.task_name, 'avatars')
+                if os.path.exists(avatars_dir):
+                    images = [f for f in os.listdir(avatars_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+                    if images:
+                        photo_path = os.path.join(avatars_dir, random.choice(images))
+                        await self.client(UploadProfilePhotoRequest(file=await self.client.upload_file(photo_path)))
+                        await self.callback(f"{self.session_name}:🖼️ Аватар установлен")
+            
+            await self.callback(f"{self.session_name}:✅ Настройка профиля завершена")
+            
+        except Exception as e:
+            await self.callback(f"{self.session_name}:❌ Ошибка настройки профиля: {e}")

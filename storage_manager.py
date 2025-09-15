@@ -20,10 +20,17 @@ TASK_DEFAULT_FILES = {
     "messages": "messages.txt",
     "names": "names.txt",
     "lastnames": "lastnames.txt",
+    "bios": "bios.txt",
     "channel_names": "channelnames.txt",
     "channel_descriptions": "channel_descriptions.txt",
     "chats": "chats.txt",
-    "pm_replies": "pm_replies.txt"
+    "pm_replies": "pm_replies.txt",
+    "spam_targets": "spam_targets.txt",
+    "forward_messages": "forward_messages.txt",
+    "stickers": "stickers.txt",
+    # Новые файлы для парсера
+    "parse_targets": "parse_targets.txt",
+    "parsed_users": "parsed_users.txt"
 }
 TASK_DEFAULT_DIRS = {
     "avatars": "avatars",
@@ -53,7 +60,14 @@ DEFAULT_TASK_SETTINGS = {
     "broadcast_target": "chats",
     "concurrent_workers": 5,
     "two_fa_password": "",
-    "reply_in_pm": False
+    "reply_in_pm": False,
+    # Новые настройки для спама
+    "spam_type": "text",  # text, sticker, forward
+    "spam_target_type": "chats",  # chats, channels, both, dm, dm_existing
+    "dm_spam_warning_accepted": False,
+    "use_existing_dialogs_only": False,
+    "spam_delay_min": 30,
+    "spam_delay_max": 90
 }
 
 def load_settings():
@@ -186,31 +200,119 @@ def list_accounts():
     valid_accounts = sorted(list(sessions.intersection(jsons)))
     return valid_accounts
 
-def create_default_json_for_session(session_name):
+def create_default_json_for_session(session_name, api_id=None, api_hash=None, two_fa=None):
+    """Создание JSON конфига для сессии с правильными параметрами"""
+    # Генерируем случайные параметры устройства
+    device_models = [
+        "SM-G973F", "iPhone12,1", "Pixel 4", "OnePlus 8T", "Xiaomi Mi 11", 
+        "HUAWEI P40", "Nokia 8.3", "Sony Xperia 1 II", "LG V60", "Realme X50"
+    ]
+    
+    system_versions = [
+        "Android 11", "iOS 14.8", "Android 10", "iOS 15.1", "Android 12",
+        "Windows 10", "macOS 12.0", "Ubuntu 20.04"
+    ]
+    
+    app_versions = [
+        "8.9.2", "8.8.5", "8.7.3", "9.0.1", "8.9.0", "9.1.2"
+    ]
+    
     part1 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
     part2 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=3))
     random_device_model = f"{part1}-{part2}"
     
+    # Используем переданные данные или значения по умолчанию
     default_json_data = {
-        "app_id": 2040,
-        "app_hash": "b18441a1ff607e10a989891a5462e627",
-        "device": random_device_model,
-        "sdk": "Windows 10",
-        "app_version": "6.0.1 x64",
-        "system_lang_pack": "en-US",
-        "system_lang_code": "en",
-        "lang_pack": "tdesktop",
+        "api_id": api_id or 2040,  # Поддержка обоих форматов
+        "app_id": api_id or 2040,
+        "api_hash": api_hash or "b18441a1ff607e10a989891a5462e627",
+        "app_hash": api_hash or "b18441a1ff607e10a989891a5462e627",
+        "device_model": random.choice(device_models),
+        "device": random_device_model,  # Для обратной совместимости
+        "system_version": random.choice(system_versions),
+        "sdk": random.choice(system_versions),  # Для обратной совместимости
+        "app_version": f"{random.choice(app_versions)} x64",
         "lang_code": "en",
-        "twoFA": None
+        "lang_pack": "tdesktop",
+        "system_lang_code": "en-US", 
+        "system_lang_pack": "en-US",
+        "twoFA": two_fa
     }
+    
     json_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
     try:
         with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(default_json_data, f, indent=4)
+            json.dump(default_json_data, f, indent=4, ensure_ascii=False)
         return True
     except Exception as e:
         print(f"Не удалось создать {session_name}.json: {e}")
         return False
+
+def validate_json_account(session_name):
+    """Валидация JSON конфига аккаунта"""
+    json_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
+    
+    if not os.path.exists(json_path):
+        return False, "JSON файл не найден"
+    
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Проверяем обязательные поля
+        api_id = data.get('api_id') or data.get('app_id')
+        api_hash = data.get('api_hash') or data.get('app_hash')
+        
+        if not api_id:
+            return False, "Отсутствует api_id/app_id"
+        if not api_hash:
+            return False, "Отсутствует api_hash/app_hash"
+        
+        try:
+            int(api_id)
+        except (ValueError, TypeError):
+            return False, "api_id должен быть числом"
+        
+        if len(str(api_hash)) < 10:
+            return False, "api_hash слишком короткий"
+        
+        return True, "OK"
+        
+    except json.JSONDecodeError:
+        return False, "Некорректный JSON формат"
+    except Exception as e:
+        return False, f"Ошибка чтения файла: {e}"
+
+def get_account_info(session_name):
+    """Получение информации об аккаунте"""
+    json_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
+    session_path = os.path.join(SESSIONS_DIR, f"{session_name}.session")
+    
+    info = {
+        'name': session_name,
+        'has_session': os.path.exists(session_path),
+        'has_json': os.path.exists(json_path),
+        'json_valid': False,
+        'json_error': None,
+        'api_id': None,
+        'has_2fa': False
+    }
+    
+    if info['has_json']:
+        is_valid, error = validate_json_account(session_name)
+        info['json_valid'] = is_valid
+        info['json_error'] = error
+        
+        if is_valid:
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                info['api_id'] = data.get('api_id') or data.get('app_id')
+                info['has_2fa'] = bool(data.get('twoFA'))
+            except:
+                pass
+    
+    return info
 
 def delete_account(session_name):
     settings = load_settings()
@@ -347,5 +449,89 @@ def clear_blacklist():
     settings = load_settings()
     settings['blacklist'] = []
     save_settings(settings)
+
+# --- Функции для работы с парсером ---
+def save_parsed_data(filename: str, data: list, format_type: str = 'json'):
+    """Сохранение спарсенных данных"""
+    export_dir = os.path.join(DATA_DIR, "exports")
+    os.makedirs(export_dir, exist_ok=True)
+    
+    filepath = os.path.join(export_dir, filename)
+    
+    if format_type == 'json':
+        import json
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    elif format_type == 'csv':
+        import csv
+        if data:
+            with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=data[0].keys())
+                writer.writeheader()
+                writer.writerows(data)
+    
+    return filepath
+
+def load_parsed_data(filename: str):
+    """Загрузка спарсенных данных"""
+    export_dir = os.path.join(DATA_DIR, "exports")
+    filepath = os.path.join(export_dir, filename)
+    
+    if not os.path.exists(filepath):
+        return []
+    
+    if filename.endswith('.json'):
+        import json
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    elif filename.endswith('.csv'):
+        import csv
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return list(csv.DictReader(f))
+    
+    return []
+
+def get_export_files():
+    """Получение списка экспортированных файлов"""
+    export_dir = os.path.join(DATA_DIR, "exports")
+    if not os.path.exists(export_dir):
+        return []
+    
+    files = []
+    for filename in os.listdir(export_dir):
+        if filename.endswith(('.json', '.csv')):
+            filepath = os.path.join(export_dir, filename)
+            stat = os.stat(filepath)
+            files.append({
+                'filename': filename,
+                'size': stat.st_size,
+                'modified': stat.st_mtime,
+                'path': filepath
+            })
+    
+    return sorted(files, key=lambda x: x['modified'], reverse=True)
+
+def create_parsing_task(task_name: str, parse_type: str, targets: list):
+    """Создание задачи парсинга"""
+    if not create_task(task_name):
+        return False
+    
+    tasks = load_tasks()
+    tasks[task_name]['type'] = f'parse_{parse_type}'
+    tasks[task_name]['parse_settings'] = {
+        'parse_type': parse_type,
+        'targets': targets,
+        'export_format': 'json',
+        'limit': 10000
+    }
+    save_tasks(tasks)
+    
+    # Сохраняем цели парсинга в файл
+    targets_file = get_task_file_path(task_name, 'parse_targets')
+    if targets_file:
+        with open(targets_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(targets))
+    
+    return True
 
 initialize_storage()

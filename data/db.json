@@ -1,0 +1,11 @@
+{
+    "proxies": [
+        "1.2.3.4:1080:user1:pass1",
+        "5.6.7.8:1080:user2:pass2",
+        "9.10.11.12:1080:user3:pass3"
+    ],
+    "blacklist": [],
+    "proxy_statuses": {},
+    "tasks": {},
+    "account_statuses": {}
+}
