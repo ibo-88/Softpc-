@@ -285,8 +285,11 @@ class TelegramManagerGUI:
         ttk.Label(create_frame, text="Тип задачи:").pack(anchor=tk.W)
         self.task_type_var = tk.StringVar()
         task_types = [
-            "check_all", "change_profile:name", "change_profile:avatar",
-            "create_channel", "join_chats", "start_broadcast",
+            "check_all", 
+            "change_profile:name", "change_profile:lastname", "change_profile:avatar", "change_profile:bio",
+            "change_profile:all",
+            "create_channel", "update_channel_design", "join_chats", 
+            "spam_chats", "spam_channels", "spam_both", "spam_dm", "spam_dm_existing",
             "set_2fa", "remove_2fa", "clean_account"
         ]
         ttk.Combobox(create_frame, textvariable=self.task_type_var, 
@@ -809,10 +812,35 @@ class TelegramManagerGUI:
             messagebox.showwarning("Предупреждение", "Выберите тип задачи")
             return
         
+        # Предупреждение для спама по ЛС
+        if task_type in ['spam_dm', 'spam_dm_existing']:
+            warning_msg = ("⚠️ ВНИМАНИЕ! ВЫСОКИЙ РИСК БЛОКИРОВКИ АККАУНТОВ!\n\n"
+                         "Спам по личным сообщениям может привести к:\n"
+                         "• Временной блокировке аккаунта\n"
+                         "• Постоянному бану\n"
+                         "• Ограничениям на отправку сообщений\n\n"
+                         "Рекомендуется:\n"
+                         "• Использовать минимальные интервалы (60-120 сек)\n"
+                         "• Тестировать на 1-2 аккаунтах\n"
+                         "• Иметь запасные аккаунты\n\n"
+                         "Продолжить создание задачи?")
+            
+            result = messagebox.askyesno("⚠️ ПРЕДУПРЕЖДЕНИЕ О РИСКАХ", warning_msg)
+            if not result:
+                return
+        
         if storage_manager.create_task(task_name):
             # Установка типа задачи
             tasks = storage_manager.load_tasks()
             tasks[task_name]['type'] = task_type
+            
+            # Специальные настройки для спама по ЛС
+            if task_type in ['spam_dm', 'spam_dm_existing']:
+                tasks[task_name]['settings']['dm_spam_warning_accepted'] = True
+                tasks[task_name]['settings']['spam_delay_min'] = 60
+                tasks[task_name]['settings']['spam_delay_max'] = 120
+                tasks[task_name]['settings']['use_existing_dialogs_only'] = (task_type == 'spam_dm_existing')
+            
             storage_manager.save_tasks(tasks)
             
             self.log(f"Создана задача: {task_name} ({task_type})")

@@ -20,10 +20,14 @@ TASK_DEFAULT_FILES = {
     "messages": "messages.txt",
     "names": "names.txt",
     "lastnames": "lastnames.txt",
+    "bios": "bios.txt",
     "channel_names": "channelnames.txt",
     "channel_descriptions": "channel_descriptions.txt",
     "chats": "chats.txt",
     "pm_replies": "pm_replies.txt",
+    "spam_targets": "spam_targets.txt",
+    "forward_messages": "forward_messages.txt",
+    "stickers": "stickers.txt",
     # Новые файлы для парсера
     "parse_targets": "parse_targets.txt",
     "parsed_users": "parsed_users.txt"
@@ -56,7 +60,14 @@ DEFAULT_TASK_SETTINGS = {
     "broadcast_target": "chats",
     "concurrent_workers": 5,
     "two_fa_password": "",
-    "reply_in_pm": False
+    "reply_in_pm": False,
+    # Новые настройки для спама
+    "spam_type": "text",  # text, sticker, forward
+    "spam_target_type": "chats",  # chats, channels, both, dm, dm_existing
+    "dm_spam_warning_accepted": False,
+    "use_existing_dialogs_only": False,
+    "spam_delay_min": 30,
+    "spam_delay_max": 90
 }
 
 def load_settings():

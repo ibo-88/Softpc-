@@ -304,17 +304,26 @@ class CoreManager:
                                                  change_lastname=False, perform_spam_check=True)
                         elif base_task == 'change_profile':
                             change = task_parts[1] if len(task_parts) > 1 else 'name'
-                            coro = worker.run_task(worker.task_check_account,
-                                                 change_name=(change in ['name', 'name_last', 'name_avatar', 'all']),
-                                                 change_lastname=(change in ['lastname', 'name_last', 'last_avatar', 'all']),
-                                                 change_avatar=(change in ['avatar', 'name_avatar', 'last_avatar', 'all']),
-                                                 perform_spam_check=False)
+                            if change == 'bio':
+                                coro = worker.run_task(worker.task_change_bio)
+                            else:
+                                coro = worker.run_task(worker.task_check_account,
+                                                     change_name=(change in ['name', 'name_last', 'name_avatar', 'all']),
+                                                     change_lastname=(change in ['lastname', 'name_last', 'last_avatar', 'all']),
+                                                     change_avatar=(change in ['avatar', 'name_avatar', 'last_avatar', 'all']),
+                                                     perform_spam_check=False)
                         elif base_task == 'create_channel':
                             coro = worker.run_task(worker.task_create_channel)
+                        elif base_task == 'update_channel_design':
+                            coro = worker.run_task(worker.task_update_channel_design)
                         elif base_task == 'join_chats':
                             coro = worker.run_task(worker.task_join_chats, work_queue=shared_work_queue)
                         elif base_task == 'start_broadcast':
                             coro = worker.run_task(worker.task_autobroadcast)
+                        elif base_task in ['spam_chats', 'spam_channels', 'spam_both']:
+                            coro = worker.run_task(worker.task_advanced_spam)
+                        elif base_task in ['spam_dm', 'spam_dm_existing']:
+                            coro = worker.run_task(worker.task_dm_spam)
                         elif base_task == 'delete_avatars':
                             coro = worker.run_task(worker.task_delete_avatars)
                         elif base_task == 'delete_lastnames':

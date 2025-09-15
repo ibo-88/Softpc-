@@ -17,13 +17,20 @@ TASK_TYPE_NAMES = {
     'change_profile:name': '👤 Смена имен',
     'change_profile:lastname': '📜 Смена фамилий',
     'change_profile:avatar': '🖼 Смена аватаров',
+    'change_profile:bio': '📝 Смена описания профиля',
     'change_profile:name_last': '👤+📜 Имена и Фамилии',
     'change_profile:name_avatar': '👤+🖼 Имена и Аватары',
     'change_profile:last_avatar': '📜+🖼 Фамилии и Аватары',
-    'change_profile:all': '👤+📜+🖼 Всё вместе',
+    'change_profile:all': '👤+📜+🖼+📝 Всё вместе',
     'create_channel': '➕ Создание каналов',
+    'update_channel_design': '🎨 Смена оформления каналов',
     'join_chats': '🚀 Вступление в чаты',
-    'start_broadcast': '📣 Рассылка',
+    'start_broadcast': '📣 Рассылка (устаревшая)',
+    'spam_chats': '💬 Спам по чатам',
+    'spam_channels': '📢 Спам по каналам', 
+    'spam_both': '💬📢 Спам по чатам + каналам',
+    'spam_dm': '📨 Спам по личкам (⚠️ РИСК СЛЁТА)',
+    'spam_dm_existing': '📬 Спам по существующим ЛС',
     'delete_avatars': '🗑️ Удаление аватаров',
     'delete_lastnames': '🗑️ Удаление фамилий',
     'set_2fa': '🔐 Установить 2FA',
@@ -337,9 +344,15 @@ def get_task_files_menu(task_name):
             f"✉️ Сообщения для рассылки: {stats.get('messages', 0)}\n"
             f"🤖 Ответы в ЛС: {stats.get('pm_replies', 0)}\n"
             f"👥 Чаты: {stats.get('chats', 0)}\n"
+            f"--- Профили ---\n"
             f"👤 Имена: {stats.get('names', 0)}\n"
             f"📜 Фамилии: {stats.get('lastnames', 0)}\n"
+            f"📝 Описания профилей: {stats.get('bios', 0)}\n"
             f"🖼 Аватарки профилей: {stats.get('avatars', 0)}\n"
+            f"--- Спам ---\n"
+            f"🎯 Цели спама: {stats.get('spam_targets', 0)}\n"
+            f"🔗 Пересылаемые сообщения: {stats.get('forward_messages', 0)}\n"
+            f"😄 Стикеры: {stats.get('stickers', 0)}\n"
             f"--- Каналы ---\n"
             f"📝 Имена каналов: {stats.get('channel_names', 0)}\n"
             f"ℹ️ Описания каналов: {stats.get('channel_descriptions', 0)}\n"
@@ -351,7 +364,11 @@ def get_task_files_menu(task_name):
         [InlineKeyboardButton("👥 Чаты", callback_data=f'task_upload:chats:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:chats:{task_name}')],
         [InlineKeyboardButton("👤 Имена", callback_data=f'task_upload:names:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:names:{task_name}')],
         [InlineKeyboardButton("📜 Фамилии", callback_data=f'task_upload:lastnames:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:lastnames:{task_name}')],
+        [InlineKeyboardButton("📝 Описания профилей", callback_data=f'task_upload:bios:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:bios:{task_name}')],
         [InlineKeyboardButton("🖼 Аватарки профилей", callback_data=f'task_upload:avatars:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:avatars:{task_name}')],
+        [InlineKeyboardButton("🎯 Цели спама", callback_data=f'task_upload:spam_targets:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:spam_targets:{task_name}')],
+        [InlineKeyboardButton("🔗 Пересылаемые сообщения", callback_data=f'task_upload:forward_messages:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:forward_messages:{task_name}')],
+        [InlineKeyboardButton("😄 Стикеры", callback_data=f'task_upload:stickers:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:stickers:{task_name}')],
         [InlineKeyboardButton("📝 Имена каналов", callback_data=f'task_upload:channel_names:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:channel_names:{task_name}')],
         [InlineKeyboardButton("ℹ️ Описания каналов", callback_data=f'task_upload:channel_descriptions:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:channel_descriptions:{task_name}')],
         [InlineKeyboardButton("🖼️ Аватарки каналов", callback_data=f'task_upload:channel_avatars:{task_name}'), InlineKeyboardButton("🗑️", callback_data=f'task_clear:channel_avatars:{task_name}')],
