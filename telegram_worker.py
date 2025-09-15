@@ -23,6 +23,7 @@ from telethon.errors.rpcerrorlist import (
 )
 from telethon.tl.types import Chat, Channel
 import storage_manager
+import autoreg_manager
 
 async def cancellable_sleep(seconds, cancel_event):
     try:
@@ -1022,3 +1023,149 @@ class TelethonWorker:
             await self.callback(f"{self.session_name}:🎉 Зачистка аккаунта успешно завершена.")
         except Exception as e:
             await self.callback(f"{self.session_name}:❌ Критическая ошибка во время зачистки: {e}")
+    
+    async def task_autoreg_warmup(self):
+        """Прогрев авторег аккаунта"""
+        await self.callback(f"{self.session_name}:🔥 Начинаю прогрев авторег аккаунта...")
+        
+        autoreg_mgr = autoreg_manager.get_autoreg_manager(self.callback)
+        
+        # Определяем возраст аккаунта
+        account_age = autoreg_mgr.detect_account_age(self.session_name)
+        await self.callback(f"{self.session_name}:📅 Возраст аккаунта: {account_age}")
+        
+        # Получаем рекомендации
+        recommendations = autoreg_mgr.get_autoreg_recommendations(account_age)
+        await self.callback(f"{self.session_name}:📋 Риск: {recommendations['risk']}")
+        
+        # Выполняем прогрев
+        success = await autoreg_mgr.warmup_account(self.session_name, self.proxy_queue)
+        
+        if success:
+            await self.callback(f"{self.session_name}:✅ Прогрев завершен успешно")
+        else:
+            await self.callback(f"{self.session_name}:❌ Ошибка прогрева")
+    
+    async def task_autoreg_gentle_join(self):
+        """Мягкое вступление в чаты для авторег аккаунтов"""
+        await self.callback(f"{self.session_name}:🌱 Мягкое вступление в чаты...")
+        
+        # Загружаем список чатов
+        chats = storage_manager.read_task_text_file_lines(self.task_name, 'chats')
+        if not chats:
+            await self.callback(f"{self.session_name}:❌ Файл chats.txt пуст")
+            return
+        
+        autoreg_mgr = autoreg_manager.get_autoreg_manager(self.callback)
+        
+        # Проверяем статус аккаунта для этой задачи
+        can_use, status_msg, settings = autoreg_mgr.get_account_status_for_task(
+            self.session_name, "join_chats"
+        )
+        
+        if not can_use:
+            await self.callback(f"{self.session_name}:🚫 {status_msg}")
+            return
+        
+        await self.callback(f"{self.session_name}:✅ {status_msg}")
+        
+        # Выполняем мягкое вступление
+        joined_count = await autoreg_mgr.gentle_join_chats(self.client, chats, self.session_name)
+        await self.callback(f"{self.session_name}:🏁 Мягкое вступление завершено: {joined_count} чатов")
+    
+    async def task_autoreg_gentle_spam(self):
+        """Мягкий спам для авторег аккаунтов"""
+        await self.callback(f"{self.session_name}:🌿 Мягкий спам для авторег аккаунта...")
+        
+        # Загружаем сообщения
+        messages = storage_manager.read_task_multiline_messages(self.task_name, 'messages')
+        if not messages:
+            await self.callback(f"{self.session_name}:❌ Файл messages.txt пуст")
+            return
+        
+        autoreg_mgr = autoreg_manager.get_autoreg_manager(self.callback)
+        
+        # Определяем тип спама из настроек задачи
+        spam_target_type = self.task_settings.get('spam_target_type', 'chats')
+        task_type = f"spam_{spam_target_type}"
+        
+        # Проверяем статус аккаунта
+        can_use, status_msg, settings = autoreg_mgr.get_account_status_for_task(
+            self.session_name, task_type
+        )
+        
+        if not can_use:
+            await self.callback(f"{self.session_name}:🚫 {status_msg}")
+            return
+        
+        await self.callback(f"{self.session_name}:✅ {status_msg}")
+        
+        # Получаем цели для спама
+        targets = await self._get_spam_targets(spam_target_type)
+        if not targets:
+            await self.callback(f"{self.session_name}:❌ Нет доступных целей")
+            return
+        
+        # Выполняем мягкий спам
+        sent_count, error_count = await autoreg_mgr.gentle_spam(
+            self.client, targets, messages, self.session_name, task_type
+        )
+        
+        await self.callback(f"{self.session_name}:🏁 Мягкий спам завершен: {sent_count} отправлено, {error_count} ошибок")
+    
+    async def task_autoreg_setup_profile(self):
+        """Настройка профиля для авторег аккаунта"""
+        await self.callback(f"{self.session_name}:👤 Настройка профиля авторег аккаунта...")
+        
+        autoreg_mgr = autoreg_manager.get_autoreg_manager(self.callback)
+        account_age = autoreg_mgr.detect_account_age(self.session_name)
+        
+        await self.callback(f"{self.session_name}:📅 Возраст аккаунта: {account_age}")
+        
+        # Постепенная настройка профиля
+        try:
+            # 1. Сначала имя (самое безопасное)
+            names = storage_manager.read_task_text_file_lines(self.task_name, 'names')
+            if names:
+                new_name = random.choice(names)
+                await self.client(UpdateProfileRequest(first_name=new_name))
+                await self.callback(f"{self.session_name}:👤 Имя установлено: {new_name}")
+                
+                # Пауза после смены имени
+                await asyncio.sleep(random.randint(60, 120))
+            
+            # 2. Потом фамилия
+            lastnames = storage_manager.read_task_text_file_lines(self.task_name, 'lastnames')
+            if lastnames:
+                new_lastname = random.choice(lastnames)
+                await self.client(UpdateProfileRequest(last_name=new_lastname))
+                await self.callback(f"{self.session_name}:📜 Фамилия установлена: {new_lastname}")
+                
+                # Пауза после смены фамилии
+                await asyncio.sleep(random.randint(60, 120))
+            
+            # 3. Описание (только для не свежих аккаунтов)
+            if account_age != "fresh":
+                bios = storage_manager.read_task_text_file_lines(self.task_name, 'bios')
+                if bios:
+                    new_bio = random.choice(bios)
+                    await self.client(UpdateProfileRequest(about=new_bio))
+                    await self.callback(f"{self.session_name}:📝 Описание установлено: {new_bio[:30]}...")
+                    
+                    # Пауза после смены описания
+                    await asyncio.sleep(random.randint(90, 180))
+            
+            # 4. Аватар (только для молодых и зрелых аккаунтов)
+            if account_age in ["young", "mature"]:
+                avatars_dir = storage_manager.get_task_file_path(self.task_name, 'avatars')
+                if os.path.exists(avatars_dir):
+                    images = [f for f in os.listdir(avatars_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+                    if images:
+                        photo_path = os.path.join(avatars_dir, random.choice(images))
+                        await self.client(UploadProfilePhotoRequest(file=await self.client.upload_file(photo_path)))
+                        await self.callback(f"{self.session_name}:🖼️ Аватар установлен")
+            
+            await self.callback(f"{self.session_name}:✅ Настройка профиля завершена")
+            
+        except Exception as e:
+            await self.callback(f"{self.session_name}:❌ Ошибка настройки профиля: {e}")

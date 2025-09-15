@@ -14,6 +14,12 @@ TASK_STATUS_EMOJI = {
 
 TASK_TYPE_NAMES = {
     'check_all': '✅ Проверка аккаунтов',
+    # Авторег специальные задачи
+    'autoreg_warmup': '🔥 Прогрев новых аккаунтов',
+    'autoreg_gentle_join': '🌱 Мягкое вступление (авторег)',
+    'autoreg_gentle_spam': '🌿 Мягкий спам (авторег)',
+    'autoreg_setup_profile': '👤 Настройка профиля (авторег)',
+    # Обычные задачи смены профиля
     'change_profile:name': '👤 Смена имен',
     'change_profile:lastname': '📜 Смена фамилий',
     'change_profile:avatar': '🖼 Смена аватаров',
@@ -22,15 +28,19 @@ TASK_TYPE_NAMES = {
     'change_profile:name_avatar': '👤+🖼 Имена и Аватары',
     'change_profile:last_avatar': '📜+🖼 Фамилии и Аватары',
     'change_profile:all': '👤+📜+🖼+📝 Всё вместе',
+    # Каналы
     'create_channel': '➕ Создание каналов',
     'update_channel_design': '🎨 Смена оформления каналов',
+    # Стандартные операции
     'join_chats': '🚀 Вступление в чаты',
     'start_broadcast': '📣 Рассылка (устаревшая)',
+    # Спам система
     'spam_chats': '💬 Спам по чатам',
     'spam_channels': '📢 Спам по каналам', 
     'spam_both': '💬📢 Спам по чатам + каналам',
     'spam_dm': '📨 Спам по личкам (⚠️ РИСК СЛЁТА)',
     'spam_dm_existing': '📬 Спам по существующим ЛС',
+    # Техническое
     'delete_avatars': '🗑️ Удаление аватаров',
     'delete_lastnames': '🗑️ Удаление фамилий',
     'set_2fa': '🔐 Установить 2FA',

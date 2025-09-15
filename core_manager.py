@@ -340,6 +340,14 @@ class CoreManager:
                             coro = worker.run_task(worker.task_reauthorize_account)
                         elif base_task == 'clean_account':
                             coro = worker.run_task(worker.task_clean_account)
+                        elif base_task == 'autoreg_warmup':
+                            coro = worker.run_task(worker.task_autoreg_warmup)
+                        elif base_task == 'autoreg_gentle_join':
+                            coro = worker.run_task(worker.task_autoreg_gentle_join)
+                        elif base_task == 'autoreg_gentle_spam':
+                            coro = worker.run_task(worker.task_autoreg_gentle_spam)
+                        elif base_task == 'autoreg_setup_profile':
+                            coro = worker.run_task(worker.task_autoreg_setup_profile)
                         
                         if coro:
                             tasks.append(coro)

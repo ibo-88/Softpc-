@@ -16,6 +16,7 @@ import core_manager
 import account_tester
 import safety_manager
 import proxy_manager
+import autoreg_manager
 
 class TelegramManagerGUI:
     def __init__(self):
@@ -43,6 +44,7 @@ class TelegramManagerGUI:
         self.core_manager = core_manager.get_core_manager(self.log)
         self.safety_manager = safety_manager.get_safety_manager()
         self.proxy_manager = proxy_manager.get_proxy_manager()
+        self.autoreg_manager = autoreg_manager.get_autoreg_manager(self.log)
         
         # Создание интерфейса
         self.create_widgets()
@@ -292,7 +294,10 @@ class TelegramManagerGUI:
         ttk.Label(create_frame, text="Тип задачи:").pack(anchor=tk.W)
         self.task_type_var = tk.StringVar()
         task_types = [
-            "check_all", 
+            "check_all",
+            # Авторег специальные задачи
+            "autoreg_warmup", "autoreg_setup_profile", "autoreg_gentle_join", "autoreg_gentle_spam",
+            # Обычные задачи
             "change_profile:name", "change_profile:lastname", "change_profile:avatar", "change_profile:bio",
             "change_profile:all",
             "create_channel", "update_channel_design", "join_chats", 
@@ -493,8 +498,19 @@ class TelegramManagerGUI:
         statuses = storage_manager.load_account_statuses()
         status = statuses.get(account_name, 'unknown')
         
+        # Определяем возраст аккаунта
+        account_age = self.autoreg_manager.detect_account_age(account_name)
+        age_names = {
+            "fresh": "🆕 Свежий (< 1 дня)",
+            "new": "🌱 Новый (< 1 недели)", 
+            "young": "🌿 Молодой (< 1 месяца)",
+            "mature": "🌳 Зрелый (> 1 месяца)",
+            "unknown": "❓ Неизвестно"
+        }
+        
         info_text = f"📱 Аккаунт: {account_name}\n"
         info_text += f"📊 Статус: {status}\n"
+        info_text += f"📅 Возраст: {age_names.get(account_age, account_age)}\n"
         info_text += f"📄 Файл сессии: {'✅' if account_info['has_session'] else '❌'}\n"
         info_text += f"⚙️ JSON конфиг: {'✅' if account_info['has_json'] else '❌'}\n"
         
@@ -506,6 +522,18 @@ class TelegramManagerGUI:
                 info_text += f"🔐 2FA: {'✅' if account_info['has_2fa'] else '❌'}\n"
             else:
                 info_text += f"❌ JSON ошибка: {account_info['json_error']}\n"
+        
+        # Рекомендации для авторег аккаунтов
+        if account_age in ["fresh", "new"]:
+            recommendations = self.autoreg_manager.get_autoreg_recommendations(account_age)
+            info_text += f"\n⚠️ {recommendations['risk']}\n"
+            info_text += f"📋 Макс. действий/день: {recommendations['max_daily_actions']}\n"
+            info_text += f"⏰ Рек. задержка: {recommendations['recommended_delay']}\n"
+        
+        # Информация о прогреве
+        needs_warmup = self.autoreg_manager.should_warmup_account(account_name)
+        if needs_warmup:
+            info_text += f"🔥 Требуется прогрев: ДА\n"
         
         # Информация о прокси
         settings = storage_manager.load_settings()
@@ -885,7 +913,7 @@ class TelegramManagerGUI:
             messagebox.showwarning("Предупреждение", "Выберите тип задачи")
             return
         
-        # Предупреждение для спама по ЛС
+        # Предупреждения для разных типов задач
         if task_type in ['spam_dm', 'spam_dm_existing']:
             warning_msg = ("⚠️ ВНИМАНИЕ! ВЫСОКИЙ РИСК БЛОКИРОВКИ АККАУНТОВ!\n\n"
                          "Спам по личным сообщениям может привести к:\n"
@@ -899,6 +927,22 @@ class TelegramManagerGUI:
                          "Продолжить создание задачи?")
             
             result = messagebox.askyesno("⚠️ ПРЕДУПРЕЖДЕНИЕ О РИСКАХ", warning_msg)
+            if not result:
+                return
+        
+        elif task_type.startswith('autoreg_'):
+            warning_msg = ("🆕 ЗАДАЧА ДЛЯ АВТОРЕГ АККАУНТОВ\n\n"
+                         "Эта задача специально разработана для новых аккаунтов:\n"
+                         "• Автоматическое определение возраста аккаунта\n"
+                         "• Безопасные интервалы и лимиты\n"
+                         "• Мягкие алгоритмы для избежания блокировок\n\n"
+                         "Рекомендации:\n"
+                         "• Используйте только для авторег аккаунтов\n"
+                         "• Начинайте с прогрева (autoreg_warmup)\n"
+                         "• Следуйте рекомендациям по возрасту аккаунта\n\n"
+                         "Продолжить создание задачи?")
+            
+            result = messagebox.askyesno("🆕 АВТОРЕГ ЗАДАЧА", warning_msg)
             if not result:
                 return
         
