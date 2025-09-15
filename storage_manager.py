@@ -23,7 +23,10 @@ TASK_DEFAULT_FILES = {
     "channel_names": "channelnames.txt",
     "channel_descriptions": "channel_descriptions.txt",
     "chats": "chats.txt",
-    "pm_replies": "pm_replies.txt"
+    "pm_replies": "pm_replies.txt",
+    # Новые файлы для парсера
+    "parse_targets": "parse_targets.txt",
+    "parsed_users": "parsed_users.txt"
 }
 TASK_DEFAULT_DIRS = {
     "avatars": "avatars",
@@ -347,5 +350,89 @@ def clear_blacklist():
     settings = load_settings()
     settings['blacklist'] = []
     save_settings(settings)
+
+# --- Функции для работы с парсером ---
+def save_parsed_data(filename: str, data: list, format_type: str = 'json'):
+    """Сохранение спарсенных данных"""
+    export_dir = os.path.join(DATA_DIR, "exports")
+    os.makedirs(export_dir, exist_ok=True)
+    
+    filepath = os.path.join(export_dir, filename)
+    
+    if format_type == 'json':
+        import json
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    elif format_type == 'csv':
+        import csv
+        if data:
+            with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=data[0].keys())
+                writer.writeheader()
+                writer.writerows(data)
+    
+    return filepath
+
+def load_parsed_data(filename: str):
+    """Загрузка спарсенных данных"""
+    export_dir = os.path.join(DATA_DIR, "exports")
+    filepath = os.path.join(export_dir, filename)
+    
+    if not os.path.exists(filepath):
+        return []
+    
+    if filename.endswith('.json'):
+        import json
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    elif filename.endswith('.csv'):
+        import csv
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return list(csv.DictReader(f))
+    
+    return []
+
+def get_export_files():
+    """Получение списка экспортированных файлов"""
+    export_dir = os.path.join(DATA_DIR, "exports")
+    if not os.path.exists(export_dir):
+        return []
+    
+    files = []
+    for filename in os.listdir(export_dir):
+        if filename.endswith(('.json', '.csv')):
+            filepath = os.path.join(export_dir, filename)
+            stat = os.stat(filepath)
+            files.append({
+                'filename': filename,
+                'size': stat.st_size,
+                'modified': stat.st_mtime,
+                'path': filepath
+            })
+    
+    return sorted(files, key=lambda x: x['modified'], reverse=True)
+
+def create_parsing_task(task_name: str, parse_type: str, targets: list):
+    """Создание задачи парсинга"""
+    if not create_task(task_name):
+        return False
+    
+    tasks = load_tasks()
+    tasks[task_name]['type'] = f'parse_{parse_type}'
+    tasks[task_name]['parse_settings'] = {
+        'parse_type': parse_type,
+        'targets': targets,
+        'export_format': 'json',
+        'limit': 10000
+    }
+    save_tasks(tasks)
+    
+    # Сохраняем цели парсинга в файл
+    targets_file = get_task_file_path(task_name, 'parse_targets')
+    if targets_file:
+        with open(targets_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(targets))
+    
+    return True
 
 initialize_storage()
