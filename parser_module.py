@@ -15,10 +15,11 @@ from telethon.errors import FloodWaitError, ChannelPrivateError, ChatAdminRequir
 import storage_manager
 
 class TelegramParser:
-    def __init__(self, session_name: str, progress_callback=None):
+    def __init__(self, session_name: str, progress_callback=None, proxy_queue=None):
         self.session_name = session_name
         self.client: Optional[TelegramClient] = None
         self.progress_callback = progress_callback
+        self.proxy_queue = proxy_queue
         self.is_connected = False
         
     async def log(self, message: str):
@@ -29,7 +30,7 @@ class TelegramParser:
             print(f"{self.session_name}: {message}")
     
     async def connect(self) -> bool:
-        """Подключение к Telegram"""
+        """Подключение к Telegram с поддержкой прокси"""
         try:
             await self.log("🔌 Подключение к Telegram...")
             
@@ -43,32 +44,76 @@ class TelegramParser:
                 
             api_id = data.get('api_id') or data.get('app_id')
             api_hash = data.get('api_hash') or data.get('app_hash')
+            two_fa = data.get('twoFA')
             
             if not api_id or not api_hash:
                 await self.log("❌ Отсутствуют API данные в .json файле")
                 return False
             
+            # Настройка прокси
+            proxy_dict = None
+            proxy_str = "без прокси"
+            proxy_from_queue = None
+            
+            if self.proxy_queue and not self.proxy_queue.empty():
+                try:
+                    proxy_from_queue = self.proxy_queue.get_nowait()
+                    p = proxy_from_queue.split(':')
+                    if len(p) == 4:
+                        proxy_dict = {
+                            'proxy_type': 'socks5', 
+                            'addr': p[0], 
+                            'port': int(p[1]), 
+                            'username': p[2], 
+                            'password': p[3]
+                        }
+                        proxy_str = f"{p[0]}:{p[1]}"
+                except (asyncio.QueueEmpty, ValueError, IndexError):
+                    pass
+            
+            await self.log(f"🌐 Подключение через {proxy_str}")
+            
+            # Параметры устройства из JSON
+            device_model = data.get('device_model') or data.get('device') or 'PC'
+            system_version = data.get('system_version') or data.get('sdk') or 'Windows 10'
+            app_version = data.get('app_version', '4.8.1 x64')
+            lang_code = data.get('lang_code') or data.get('lang_pack') or 'en'
+            system_lang_code = data.get('system_lang_code') or data.get('system_lang_pack') or 'en-US'
+            
             self.client = TelegramClient(
                 os.path.join(storage_manager.SESSIONS_DIR, self.session_name),
                 int(api_id),
                 api_hash,
-                timeout=30
+                device_model=device_model,
+                system_version=system_version,
+                app_version=app_version,
+                lang_code=lang_code,
+                system_lang_code=system_lang_code,
+                proxy=proxy_dict,
+                timeout=30,
+                catch_up=False
             )
             
             await self.client.connect()
             
             if not await self.client.is_user_authorized():
-                two_fa = data.get('twoFA')
                 if two_fa:
                     await self.client.sign_in(password=two_fa)
                 else:
-                    await self.log("❌ Аккаунт не авторизован")
+                    await self.log("❌ Аккаунт не авторизован (нужен 2FA пароль)")
                     return False
+            
+            # Возвращаем прокси в очередь для других аккаунтов
+            if proxy_from_queue and self.proxy_queue:
+                self.proxy_queue.put_nowait(proxy_from_queue)
             
             self.is_connected = True
             await self.log("✅ Успешное подключение")
             return True
             
+        except (asyncio.TimeoutError, OSError) as e:
+            await self.log(f"⚠️ Прокси {proxy_str} не работает ({type(e).__name__})")
+            return False
         except Exception as e:
             await self.log(f"❌ Ошибка подключения: {e}")
             return False

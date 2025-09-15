@@ -170,8 +170,15 @@ class CoreManager:
                     async def progress_callback(text):
                         self.log(text)
                     
-                    # Создаем парсер
-                    parser = parser_module.TelegramParser(account_name, progress_callback)
+                    # Создаем очередь прокси
+                    global_settings = storage_manager.load_settings()
+                    proxies = global_settings.get('proxies', [])
+                    proxy_queue = asyncio.Queue()
+                    for p in proxies:
+                        proxy_queue.put_nowait(p)
+                    
+                    # Создаем парсер с прокси
+                    parser = parser_module.TelegramParser(account_name, progress_callback, proxy_queue)
                     
                     if not await parser.connect():
                         self.log("Не удалось подключиться для парсинга")

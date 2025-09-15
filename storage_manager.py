@@ -189,31 +189,119 @@ def list_accounts():
     valid_accounts = sorted(list(sessions.intersection(jsons)))
     return valid_accounts
 
-def create_default_json_for_session(session_name):
+def create_default_json_for_session(session_name, api_id=None, api_hash=None, two_fa=None):
+    """Создание JSON конфига для сессии с правильными параметрами"""
+    # Генерируем случайные параметры устройства
+    device_models = [
+        "SM-G973F", "iPhone12,1", "Pixel 4", "OnePlus 8T", "Xiaomi Mi 11", 
+        "HUAWEI P40", "Nokia 8.3", "Sony Xperia 1 II", "LG V60", "Realme X50"
+    ]
+    
+    system_versions = [
+        "Android 11", "iOS 14.8", "Android 10", "iOS 15.1", "Android 12",
+        "Windows 10", "macOS 12.0", "Ubuntu 20.04"
+    ]
+    
+    app_versions = [
+        "8.9.2", "8.8.5", "8.7.3", "9.0.1", "8.9.0", "9.1.2"
+    ]
+    
     part1 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
     part2 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=3))
     random_device_model = f"{part1}-{part2}"
     
+    # Используем переданные данные или значения по умолчанию
     default_json_data = {
-        "app_id": 2040,
-        "app_hash": "b18441a1ff607e10a989891a5462e627",
-        "device": random_device_model,
-        "sdk": "Windows 10",
-        "app_version": "6.0.1 x64",
-        "system_lang_pack": "en-US",
-        "system_lang_code": "en",
-        "lang_pack": "tdesktop",
+        "api_id": api_id or 2040,  # Поддержка обоих форматов
+        "app_id": api_id or 2040,
+        "api_hash": api_hash or "b18441a1ff607e10a989891a5462e627",
+        "app_hash": api_hash or "b18441a1ff607e10a989891a5462e627",
+        "device_model": random.choice(device_models),
+        "device": random_device_model,  # Для обратной совместимости
+        "system_version": random.choice(system_versions),
+        "sdk": random.choice(system_versions),  # Для обратной совместимости
+        "app_version": f"{random.choice(app_versions)} x64",
         "lang_code": "en",
-        "twoFA": None
+        "lang_pack": "tdesktop",
+        "system_lang_code": "en-US", 
+        "system_lang_pack": "en-US",
+        "twoFA": two_fa
     }
+    
     json_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
     try:
         with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(default_json_data, f, indent=4)
+            json.dump(default_json_data, f, indent=4, ensure_ascii=False)
         return True
     except Exception as e:
         print(f"Не удалось создать {session_name}.json: {e}")
         return False
+
+def validate_json_account(session_name):
+    """Валидация JSON конфига аккаунта"""
+    json_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
+    
+    if not os.path.exists(json_path):
+        return False, "JSON файл не найден"
+    
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Проверяем обязательные поля
+        api_id = data.get('api_id') or data.get('app_id')
+        api_hash = data.get('api_hash') or data.get('app_hash')
+        
+        if not api_id:
+            return False, "Отсутствует api_id/app_id"
+        if not api_hash:
+            return False, "Отсутствует api_hash/app_hash"
+        
+        try:
+            int(api_id)
+        except (ValueError, TypeError):
+            return False, "api_id должен быть числом"
+        
+        if len(str(api_hash)) < 10:
+            return False, "api_hash слишком короткий"
+        
+        return True, "OK"
+        
+    except json.JSONDecodeError:
+        return False, "Некорректный JSON формат"
+    except Exception as e:
+        return False, f"Ошибка чтения файла: {e}"
+
+def get_account_info(session_name):
+    """Получение информации об аккаунте"""
+    json_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
+    session_path = os.path.join(SESSIONS_DIR, f"{session_name}.session")
+    
+    info = {
+        'name': session_name,
+        'has_session': os.path.exists(session_path),
+        'has_json': os.path.exists(json_path),
+        'json_valid': False,
+        'json_error': None,
+        'api_id': None,
+        'has_2fa': False
+    }
+    
+    if info['has_json']:
+        is_valid, error = validate_json_account(session_name)
+        info['json_valid'] = is_valid
+        info['json_error'] = error
+        
+        if is_valid:
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                info['api_id'] = data.get('api_id') or data.get('app_id')
+                info['has_2fa'] = bool(data.get('twoFA'))
+            except:
+                pass
+    
+    return info
 
 def delete_account(session_name):
     settings = load_settings()

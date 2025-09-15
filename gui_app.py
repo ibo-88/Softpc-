@@ -12,6 +12,7 @@ import storage_manager
 import telegram_worker
 import parser_module
 import core_manager
+import account_tester
 
 class TelegramManagerGUI:
     def __init__(self):
@@ -143,6 +144,8 @@ class TelegramManagerGUI:
         buttons_frame = ttk.Frame(right_frame)
         buttons_frame.pack(fill=tk.X, pady=(0, 10))
         
+        ttk.Button(buttons_frame, text="🧪 Тест подключения", 
+                  command=self.test_selected_account).pack(fill=tk.X, pady=2)
         ttk.Button(buttons_frame, text="Проверить аккаунт", 
                   command=self.check_selected_account).pack(fill=tk.X, pady=2)
         ttk.Button(buttons_frame, text="Сменить профиль", 
@@ -438,26 +441,34 @@ class TelegramManagerGUI:
         """Обновление информации об аккаунте"""
         self.account_info_text.delete(1.0, tk.END)
         
-        # Получение информации
+        # Получение подробной информации
+        account_info = storage_manager.get_account_info(account_name)
         statuses = storage_manager.load_account_statuses()
         status = statuses.get(account_name, 'unknown')
         
-        info_text = f"Аккаунт: {account_name}\n"
-        info_text += f"Статус: {status}\n"
-        info_text += f"Файл сессии: {account_name}.session\n"
-        info_text += f"Конфигурация: {account_name}.json\n"
+        info_text = f"📱 Аккаунт: {account_name}\n"
+        info_text += f"📊 Статус: {status}\n"
+        info_text += f"📄 Файл сессии: {'✅' if account_info['has_session'] else '❌'}\n"
+        info_text += f"⚙️ JSON конфиг: {'✅' if account_info['has_json'] else '❌'}\n"
         
-        # Проверка файлов
-        session_path = os.path.join(storage_manager.SESSIONS_DIR, f"{account_name}.session")
-        json_path = os.path.join(storage_manager.SESSIONS_DIR, f"{account_name}.json")
+        if account_info['has_json']:
+            if account_info['json_valid']:
+                info_text += f"✅ JSON валидный\n"
+                if account_info['api_id']:
+                    info_text += f"🔑 API ID: {account_info['api_id']}\n"
+                info_text += f"🔐 2FA: {'✅' if account_info['has_2fa'] else '❌'}\n"
+            else:
+                info_text += f"❌ JSON ошибка: {account_info['json_error']}\n"
         
-        info_text += f"Файл сессии существует: {'Да' if os.path.exists(session_path) else 'Нет'}\n"
-        info_text += f"JSON конфиг существует: {'Да' if os.path.exists(json_path) else 'Нет'}\n"
+        # Информация о прокси
+        settings = storage_manager.load_settings()
+        proxies_count = len(settings.get('proxies', []))
+        info_text += f"🌐 Прокси в системе: {proxies_count}\n"
         
         # Информация о задачах
         tasks_using_account = [name for name, data in self.tasks.items() 
                              if account_name in data.get('accounts', [])]
-        info_text += f"Используется в задачах: {', '.join(tasks_using_account) if tasks_using_account else 'Нет'}\n"
+        info_text += f"🎯 Задачи: {', '.join(tasks_using_account) if tasks_using_account else 'Нет'}\n"
         
         self.account_info_text.insert(1.0, info_text)
     
@@ -496,17 +507,60 @@ class TelegramManagerGUI:
         self.log(f"Автопрокрутка: {'включена' if self.autoscroll_enabled else 'выключена'}")
     
     def load_sessions(self):
-        """Загрузка сессий из ZIP файла"""
+        """Загрузка сессий из ZIP файла с валидацией"""
         filename = filedialog.askopenfilename(
             title="Выберите ZIP архив с сессиями",
             filetypes=[("ZIP files", "*.zip"), ("All files", "*.*")]
         )
         if filename:
             try:
+                self.log(f"📦 Распаковываю архив: {os.path.basename(filename)}")
                 storage_manager.unpack_zip(filename, storage_manager.SESSIONS_DIR)
+                
+                # Валидация загруженных аккаунтов
+                self.log("🔍 Валидирую загруженные аккаунты...")
+                accounts = storage_manager.list_accounts()
+                
+                valid_count = 0
+                invalid_count = 0
+                missing_json_count = 0
+                
+                for account in accounts:
+                    account_info = storage_manager.get_account_info(account)
+                    
+                    if not account_info['has_json']:
+                        # Создаем JSON по умолчанию для сессий без JSON
+                        storage_manager.create_default_json_for_session(account)
+                        missing_json_count += 1
+                        self.log(f"📝 Создан JSON для {account}")
+                    elif not account_info['json_valid']:
+                        self.log(f"⚠️ {account}: {account_info['json_error']}")
+                        invalid_count += 1
+                    else:
+                        valid_count += 1
+                
                 self.refresh_accounts()
-                self.log(f"Сессии загружены из: {filename}")
+                
+                # Отчет о загрузке
+                report = f"📊 Загрузка завершена:\n"
+                report += f"✅ Валидных аккаунтов: {valid_count}\n"
+                if missing_json_count > 0:
+                    report += f"📝 Создано JSON файлов: {missing_json_count}\n"
+                if invalid_count > 0:
+                    report += f"⚠️ Аккаунтов с ошибками: {invalid_count}\n"
+                
+                self.log(report)
+                
+                if invalid_count > 0:
+                    messagebox.showwarning("Предупреждение", 
+                                         f"Загружено {valid_count} аккаунтов.\n"
+                                         f"{invalid_count} аккаунтов имеют ошибки в JSON конфигурации.\n\n"
+                                         "Проверьте логи для подробностей.")
+                else:
+                    messagebox.showinfo("Успех", f"Успешно загружено {valid_count} аккаунтов!")
+                
             except Exception as e:
+                self.log(f"❌ Ошибка загрузки: {e}")
                 messagebox.showerror("Ошибка", f"Не удалось загрузить сессии: {e}")
     
     def check_selected_account(self):
@@ -518,14 +572,98 @@ class TelegramManagerGUI:
         self.log(f"Начинаю проверку аккаунта: {self.current_account}")
         self.core_manager.check_account_async(self.current_account)
     
+    def test_selected_account(self):
+        """Тестирование подключения выбранного аккаунта"""
+        if not self.current_account:
+            messagebox.showwarning("Предупреждение", "Выберите аккаунт для тестирования")
+            return
+        
+        self.log(f"🧪 Тестирую подключение аккаунта: {self.current_account}")
+        
+        def test_account():
+            async def _test():
+                try:
+                    async def progress_callback(text):
+                        self.log(text)
+                    
+                    result = await account_tester.test_account_connection(
+                        self.current_account, progress_callback
+                    )
+                    
+                    if result['success']:
+                        user_info = result.get('user_info', {})
+                        proxy_info = f" через {result['proxy_used']}" if result['proxy_used'] else ""
+                        self.log(f"✅ {self.current_account}: Подключение успешно{proxy_info} ({result['connection_time']}с)")
+                        
+                        if user_info:
+                            name = f"{user_info.get('first_name', '')} {user_info.get('last_name', '')}".strip()
+                            self.log(f"👤 Пользователь: {name} (@{user_info.get('username', 'без_username')})")
+                            self.log(f"📞 Телефон: {user_info.get('phone', 'скрыт')}")
+                    else:
+                        self.log(f"❌ {self.current_account}: {result['error']}")
+                        
+                except Exception as e:
+                    self.log(f"❌ Критическая ошибка тестирования: {e}")
+            
+            # Запускаем в event loop
+            future = self.core_manager.run_async_task(_test())
+            if future:
+                future.result()
+        
+        thread = threading.Thread(target=test_account)
+        thread.start()
+    
     def check_all_accounts(self):
         """Проверка всех аккаунтов"""
         if not self.accounts:
             messagebox.showwarning("Предупреждение", "Нет аккаунтов для проверки")
             return
         
-        self.log("Начинаю проверку всех аккаунтов...")
-        self.core_manager.check_all_accounts_async(self.accounts)
+        result = messagebox.askyesno("Подтверждение", 
+                                   f"Запустить тестирование {len(self.accounts)} аккаунтов?\n\n"
+                                   "Это может занять несколько минут.")
+        if not result:
+            return
+        
+        self.log("🚀 Начинаю тестирование всех аккаунтов...")
+        
+        def test_all():
+            async def _test_all():
+                try:
+                    async def progress_callback(text):
+                        self.log(text)
+                    
+                    results = await account_tester.test_all_accounts(progress_callback)
+                    
+                    # Обновляем статусы аккаунтов
+                    statuses = storage_manager.load_account_statuses()
+                    
+                    for result in results:
+                        session_name = result['session_name']
+                        if result['success']:
+                            statuses[session_name] = 'valid'
+                        else:
+                            if 'забанен' in result['error'].lower():
+                                statuses[session_name] = 'invalid'
+                            elif '2fa' in result['error'].lower():
+                                statuses[session_name] = 'unknown'
+                            else:
+                                statuses[session_name] = 'invalid'
+                    
+                    storage_manager.save_account_statuses(statuses)
+                    
+                    # Обновляем интерфейс
+                    self.root.after(0, self.refresh_accounts)
+                    
+                except Exception as e:
+                    self.log(f"❌ Критическая ошибка массового тестирования: {e}")
+            
+            future = self.core_manager.run_async_task(_test_all())
+            if future:
+                future.result()
+        
+        thread = threading.Thread(target=test_all)
+        thread.start()
     
     def change_profile(self):
         """Смена профиля аккаунта"""
@@ -822,8 +960,73 @@ class TelegramManagerGUI:
     
     def check_proxies(self):
         """Проверка прокси"""
-        self.log("Начинаю проверку прокси...")
-        # TODO: Реализовать проверку прокси
+        settings = storage_manager.load_settings()
+        proxies = settings.get('proxies', [])
+        
+        if not proxies:
+            messagebox.showwarning("Предупреждение", "Нет прокси для проверки")
+            return
+        
+        result = messagebox.askyesno("Подтверждение", 
+                                   f"Проверить {len(proxies)} прокси?\n\n"
+                                   "Это может занять несколько минут.")
+        if not result:
+            return
+        
+        self.log(f"🔍 Начинаю проверку {len(proxies)} прокси...")
+        
+        def check_all_proxies():
+            async def _check_proxies():
+                try:
+                    tester = account_tester.AccountTester(
+                        lambda msg: asyncio.create_task(self._async_log(msg))
+                    )
+                    
+                    proxy_statuses = {}
+                    semaphore = asyncio.Semaphore(10)  # Ограничиваем параллельность
+                    
+                    async def check_single_proxy(proxy_str):
+                        async with semaphore:
+                            result = await tester.test_proxy_connection(proxy_str)
+                            proxy_statuses[proxy_str] = {
+                                'status': 'working' if result['success'] else 'not_working',
+                                'country': 'N/A',  # Можно добавить определение страны
+                                'response_time': result.get('response_time', 0),
+                                'error': result.get('error')
+                            }
+                            
+                            status_symbol = "✅" if result['success'] else "❌"
+                            await self._async_log(f"{status_symbol} {proxy_str.split(':')[0]}:{proxy_str.split(':')[1]}")
+                    
+                    # Проверяем все прокси параллельно
+                    tasks = [check_single_proxy(proxy) for proxy in proxies]
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    # Сохраняем результаты
+                    storage_manager.save_proxy_statuses(proxy_statuses)
+                    
+                    # Статистика
+                    working = sum(1 for status in proxy_statuses.values() if status['status'] == 'working')
+                    not_working = len(proxy_statuses) - working
+                    
+                    await self._async_log(f"📊 Проверка завершена: {working} работает, {not_working} не работает")
+                    
+                    # Обновляем интерфейс
+                    self.root.after(0, self.refresh_proxy_list)
+                    
+                except Exception as e:
+                    await self._async_log(f"❌ Критическая ошибка проверки прокси: {e}")
+            
+            future = self.core_manager.run_async_task(_check_proxies())
+            if future:
+                future.result()
+        
+        thread = threading.Thread(target=check_all_proxies)
+        thread.start()
+    
+    async def _async_log(self, message):
+        """Асинхронное логирование"""
+        self.root.after(0, lambda: self.log(message))
     
     def delete_proxy(self):
         """Удаление выбранных прокси"""
