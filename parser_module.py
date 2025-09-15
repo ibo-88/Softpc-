@@ -225,6 +225,122 @@ class TelegramParser:
             await self.log(f"❌ Ошибка парсинга сообщений: {e}")
             return []
     
+    async def parse_usernames_only(self, group_identifier: str, limit: int = 10000) -> List[Dict]:
+        """Парсинг только никнеймов участников группы/канала"""
+        if not self.is_connected:
+            await self.log("❌ Нет подключения к Telegram")
+            return []
+        
+        try:
+            await self.log(f"📛 Начинаю парсинг никнеймов: {group_identifier}")
+            
+            # Получаем объект группы/канала
+            entity = await self.client.get_entity(group_identifier)
+            await self.log(f"📍 Найден: {entity.title}")
+            
+            usernames = []
+            unique_usernames = set()
+            offset = 0
+            batch_size = 200
+            
+            while len(usernames) < limit:
+                try:
+                    batch = await self.client(GetParticipantsRequest(
+                        entity,
+                        ChannelParticipantsSearch(''),
+                        offset,
+                        batch_size,
+                        hash=0
+                    ))
+                    
+                    if not batch.users:
+                        break
+                    
+                    for user in batch.users:
+                        if len(usernames) >= limit:
+                            break
+                        
+                        # Собираем только пользователей с никнеймами
+                        if user.username and user.username not in unique_usernames:
+                            username_data = {
+                                'username': user.username,
+                                'id': user.id,
+                                'first_name': user.first_name or '',
+                                'last_name': user.last_name or '',
+                                'is_bot': user.bot,
+                                'is_verified': user.verified,
+                                'is_premium': getattr(user, 'premium', False),
+                                'source_chat': entity.title,
+                                'source_chat_id': entity.id,
+                                'parsed_at': datetime.datetime.now().isoformat()
+                            }
+                            usernames.append(username_data)
+                            unique_usernames.add(user.username)
+                    
+                    offset += len(batch.users)
+                    await self.log(f"📛 Найдено никнеймов: {len(usernames)}")
+                    
+                    # Небольшая пауза между запросами
+                    await asyncio.sleep(1)
+                    
+                except FloodWaitError as e:
+                    await self.log(f"⏳ Флуд контроль: ожидание {e.seconds} секунд")
+                    await asyncio.sleep(e.seconds)
+                    continue
+                except Exception as e:
+                    await self.log(f"⚠️ Ошибка в батче: {e}")
+                    break
+            
+            await self.log(f"✅ Парсинг никнеймов завершен. Получено: {len(usernames)} уникальных никнеймов")
+            return usernames
+            
+        except ChannelPrivateError:
+            await self.log("❌ Группа/канал приватные или недоступны")
+            return []
+        except ChatAdminRequiredError:
+            await self.log("❌ Требуются права администратора")
+            return []
+        except Exception as e:
+            await self.log(f"❌ Ошибка парсинга никнеймов: {e}")
+            return []
+    
+    async def parse_multiple_chats_usernames(self, chat_list: List[str], limit_per_chat: int = 5000) -> List[Dict]:
+        """Парсинг никнеймов из нескольких чатов сразу"""
+        if not self.is_connected:
+            await self.log("❌ Нет подключения к Telegram")
+            return []
+        
+        all_usernames = []
+        unique_usernames = set()
+        
+        await self.log(f"🎯 Начинаю парсинг никнеймов из {len(chat_list)} чатов")
+        
+        for i, chat_identifier in enumerate(chat_list, 1):
+            try:
+                await self.log(f"📛 [{i}/{len(chat_list)}] Парсинг: {chat_identifier}")
+                
+                chat_usernames = await self.parse_usernames_only(chat_identifier, limit_per_chat)
+                
+                # Добавляем только уникальные никнеймы
+                new_usernames = 0
+                for username_data in chat_usernames:
+                    if username_data['username'] not in unique_usernames:
+                        all_usernames.append(username_data)
+                        unique_usernames.add(username_data['username'])
+                        new_usernames += 1
+                
+                await self.log(f"✅ [{i}/{len(chat_list)}] Добавлено {new_usernames} новых никнеймов")
+                
+                # Пауза между чатами
+                await asyncio.sleep(2)
+                
+            except Exception as e:
+                await self.log(f"❌ [{i}/{len(chat_list)}] Ошибка с {chat_identifier}: {e}")
+                continue
+        
+        await self.log(f"🎉 Парсинг завершен! Всего уникальных никнеймов: {len(all_usernames)}")
+        return all_usernames
+    
     async def get_user_dialogs(self) -> List[Dict]:
         """Получение списка диалогов пользователя"""
         if not self.is_connected:
@@ -306,6 +422,38 @@ class TelegramParser:
         except Exception as e:
             await self.log(f"❌ Ошибка экспорта: {e}")
             return False
+    
+    async def export_usernames_to_txt(self, data: List[Dict], filename: str) -> bool:
+        """Экспорт только никнеймов в текстовый файл (по одному на строку)"""
+        try:
+            if not data:
+                await self.log("⚠️ Нет данных для экспорта")
+                return False
+            
+            export_dir = os.path.join(storage_manager.DATA_DIR, "exports")
+            os.makedirs(export_dir, exist_ok=True)
+            
+            filepath = os.path.join(export_dir, filename)
+            
+            # Извлекаем только никнеймы
+            usernames = []
+            for item in data:
+                if 'username' in item and item['username']:
+                    usernames.append(item['username'])
+            
+            # Убираем дубликаты и сортируем
+            unique_usernames = sorted(list(set(usernames)))
+            
+            with open(filepath, 'w', encoding='utf-8') as txtfile:
+                for username in unique_usernames:
+                    txtfile.write(f"@{username}\n" if not username.startswith('@') else f"{username}\n")
+            
+            await self.log(f"✅ {len(unique_usernames)} никнеймов экспортированы в: {filepath}")
+            return True
+            
+        except Exception as e:
+            await self.log(f"❌ Ошибка экспорта никнеймов: {e}")
+            return False
 
 # Функции для интеграции с существующей системой
 async def create_parser_task(session_name: str, task_type: str, target: str, options: Dict):
@@ -316,13 +464,42 @@ async def create_parser_task(session_name: str, task_type: str, target: str, opt
         return False
     
     try:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         if task_type == "parse_members":
             limit = options.get('limit', 10000)
             data = await parser.parse_group_members(target, limit)
             
             if data and options.get('export_format'):
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"members_{target}_{timestamp}"
+                safe_target = target.replace('@', '').replace('/', '_').replace(':', '_')
+                filename = f"members_{safe_target}_{timestamp}"
+                
+                if options['export_format'] == 'csv':
+                    await parser.export_to_csv(data, f"{filename}.csv")
+                elif options['export_format'] == 'json':
+                    await parser.export_to_json(data, f"{filename}.json")
+        
+        elif task_type == "parse_usernames":
+            limit = options.get('limit', 10000)
+            data = await parser.parse_usernames_only(target, limit)
+            
+            if data and options.get('export_format'):
+                safe_target = target.replace('@', '').replace('/', '_').replace(':', '_')
+                filename = f"usernames_{safe_target}_{timestamp}"
+                
+                if options['export_format'] == 'csv':
+                    await parser.export_to_csv(data, f"{filename}.csv")
+                elif options['export_format'] == 'json':
+                    await parser.export_to_json(data, f"{filename}.json")
+        
+        elif task_type == "parse_multiple_usernames":
+            # target должен содержать список чатов, разделенных переносом строки
+            chat_list = [chat.strip() for chat in target.split('\n') if chat.strip()]
+            limit_per_chat = options.get('limit_per_chat', 5000)
+            data = await parser.parse_multiple_chats_usernames(chat_list, limit_per_chat)
+            
+            if data and options.get('export_format'):
+                filename = f"usernames_multiple_{timestamp}"
                 
                 if options['export_format'] == 'csv':
                     await parser.export_to_csv(data, f"{filename}.csv")
@@ -334,8 +511,8 @@ async def create_parser_task(session_name: str, task_type: str, target: str, opt
             data = await parser.parse_chat_messages(target, limit)
             
             if data and options.get('export_format'):
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"messages_{target}_{timestamp}"
+                safe_target = target.replace('@', '').replace('/', '_').replace(':', '_')
+                filename = f"messages_{safe_target}_{timestamp}"
                 
                 if options['export_format'] == 'csv':
                     await parser.export_to_csv(data, f"{filename}.csv")
@@ -346,7 +523,6 @@ async def create_parser_task(session_name: str, task_type: str, target: str, opt
             data = await parser.get_user_dialogs()
             
             if data and options.get('export_format'):
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"dialogs_{session_name}_{timestamp}"
                 
                 if options['export_format'] == 'csv':

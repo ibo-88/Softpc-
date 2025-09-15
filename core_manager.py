@@ -182,6 +182,14 @@ class CoreManager:
                     if parse_type == "members":
                         limit = options.get('limit', 10000)
                         data = await parser.parse_group_members(target, limit)
+                    elif parse_type == "usernames":
+                        limit = options.get('limit', 10000)
+                        data = await parser.parse_usernames_only(target, limit)
+                    elif parse_type == "multiple_usernames":
+                        # target должен содержать список чатов
+                        chat_list = [chat.strip() for chat in target.split('\n') if chat.strip()]
+                        limit_per_chat = options.get('limit_per_chat', 5000)
+                        data = await parser.parse_multiple_chats_usernames(chat_list, limit_per_chat)
                     elif parse_type == "messages":
                         limit = options.get('limit', 1000)
                         data = await parser.parse_chat_messages(target, limit)
@@ -192,12 +200,15 @@ class CoreManager:
                     if data and options.get('export_format'):
                         from datetime import datetime
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        filename = f"{parse_type}_{target.replace('@', '').replace('/', '_')}_{timestamp}"
+                        safe_target = target.replace('@', '').replace('/', '_').replace(':', '_')[:50]  # Ограничиваем длину
+                        filename = f"{parse_type}_{safe_target}_{timestamp}"
                         
                         if options['export_format'] == 'csv':
                             await parser.export_to_csv(data, f"{filename}.csv")
                         elif options['export_format'] == 'json':
                             await parser.export_to_json(data, f"{filename}.json")
+                        elif options['export_format'] == 'txt' and parse_type in ['usernames', 'multiple_usernames']:
+                            await parser.export_usernames_to_txt(data, f"{filename}.txt")
                     
                     await parser.disconnect()
                     self.log(f"Парсинг завершен. Получено записей: {len(data)}")

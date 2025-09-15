@@ -176,33 +176,44 @@ class TelegramManagerGUI:
         
         # Тип парсинга
         ttk.Label(top_frame, text="Тип парсинга:").grid(row=0, column=2, sticky=tk.W, padx=(0, 10))
-        self.parse_type_var = tk.StringVar(value="members")
+        self.parse_type_var = tk.StringVar(value="usernames")
         parse_type_combo = ttk.Combobox(top_frame, textvariable=self.parse_type_var, 
-                                      values=["members", "messages", "dialogs"], width=15, state="readonly")
+                                      values=["usernames", "members", "multiple_usernames", "messages", "dialogs"], 
+                                      width=18, state="readonly")
         parse_type_combo.grid(row=0, column=3)
         
+        # Привязываем событие изменения типа парсинга
+        parse_type_combo.bind('<<ComboboxSelected>>', self.on_parse_type_changed)
+        
         # Цель парсинга
-        ttk.Label(top_frame, text="Цель (ссылка/username):").grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
+        self.parse_target_label = ttk.Label(top_frame, text="Цель (ссылка/username):")
+        self.parse_target_label.grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
         self.parse_target_var = tk.StringVar()
-        parse_target_entry = ttk.Entry(top_frame, textvariable=self.parse_target_var, width=50)
-        parse_target_entry.grid(row=1, column=1, columnspan=2, sticky=tk.W, pady=(10, 0), padx=(0, 20))
+        self.parse_target_entry = ttk.Entry(top_frame, textvariable=self.parse_target_var, width=50)
+        self.parse_target_entry.grid(row=1, column=1, columnspan=2, sticky=tk.W, pady=(10, 0), padx=(0, 20))
+        
+        # Текстовое поле для множественного парсинга (скрыто по умолчанию)
+        self.parse_target_text = tk.Text(top_frame, height=4, width=50)
+        self.parse_target_text.grid(row=2, column=1, columnspan=2, sticky=tk.W, pady=(5, 0), padx=(0, 20))
+        self.parse_target_text.grid_remove()  # Скрываем изначально
         
         # Лимит
-        ttk.Label(top_frame, text="Лимит:").grid(row=1, column=2, sticky=tk.W, pady=(10, 0), padx=(20, 10))
-        self.parse_limit_var = tk.StringVar(value="1000")
-        parse_limit_entry = ttk.Entry(top_frame, textvariable=self.parse_limit_var, width=10)
-        parse_limit_entry.grid(row=1, column=3, pady=(10, 0))
+        self.parse_limit_label = ttk.Label(top_frame, text="Лимит:")
+        self.parse_limit_label.grid(row=1, column=2, sticky=tk.W, pady=(10, 0), padx=(20, 10))
+        self.parse_limit_var = tk.StringVar(value="10000")
+        self.parse_limit_entry = ttk.Entry(top_frame, textvariable=self.parse_limit_var, width=10)
+        self.parse_limit_entry.grid(row=1, column=3, pady=(10, 0))
         
         # Формат экспорта
-        ttk.Label(top_frame, text="Формат экспорта:").grid(row=2, column=0, sticky=tk.W, pady=(10, 0))
-        self.export_format_var = tk.StringVar(value="csv")
+        ttk.Label(top_frame, text="Формат экспорта:").grid(row=3, column=0, sticky=tk.W, pady=(10, 0))
+        self.export_format_var = tk.StringVar(value="txt")
         format_combo = ttk.Combobox(top_frame, textvariable=self.export_format_var, 
-                                  values=["csv", "json"], width=10, state="readonly")
-        format_combo.grid(row=2, column=1, sticky=tk.W, pady=(10, 0))
+                                  values=["txt", "csv", "json"], width=10, state="readonly")
+        format_combo.grid(row=3, column=1, sticky=tk.W, pady=(10, 0))
         
         # Кнопка запуска
         ttk.Button(top_frame, text="🚀 Начать парсинг", 
-                  command=self.start_parsing).grid(row=2, column=3, pady=(10, 0))
+                  command=self.start_parsing).grid(row=3, column=3, pady=(10, 0))
         
         # Средняя панель - прогресс
         progress_frame = ttk.LabelFrame(parser_frame, text="Прогресс парсинга", padding=10)
@@ -544,25 +555,44 @@ class TelegramManagerGUI:
         """Запуск парсинга"""
         account = self.parser_account_var.get()
         parse_type = self.parse_type_var.get()
-        target = self.parse_target_var.get()
-        limit = self.parse_limit_var.get()
         export_format = self.export_format_var.get()
         
         if not account:
             messagebox.showwarning("Предупреждение", "Выберите аккаунт для парсинга")
             return
         
-        if not target:
-            messagebox.showwarning("Предупреждение", "Укажите цель парсинга")
-            return
+        # Получаем цель парсинга в зависимости от типа
+        if parse_type == "multiple_usernames":
+            target = self.parse_target_text.get(1.0, tk.END).strip()
+            if not target or target == "@chat1\n@chat2\nhttps://t.me/chat3\n...":
+                messagebox.showwarning("Предупреждение", "Укажите список чатов для парсинга")
+                return
+        else:
+            target = self.parse_target_var.get().strip()
+            if not target:
+                if parse_type != "dialogs":  # Для dialogs цель не нужна
+                    messagebox.showwarning("Предупреждение", "Укажите цель парсинга")
+                    return
+                else:
+                    target = "dialogs"  # Заглушка для dialogs
         
+        # Проверка лимита
+        limit_str = self.parse_limit_var.get()
         try:
-            limit = int(limit)
+            limit = int(limit_str)
+            if limit <= 0:
+                raise ValueError("Лимит должен быть положительным числом")
         except ValueError:
-            messagebox.showerror("Ошибка", "Лимит должен быть числом")
+            messagebox.showerror("Ошибка", "Лимит должен быть положительным числом")
             return
         
-        self.log(f"Начинаю парсинг: {parse_type} из {target} (аккаунт: {account})")
+        # Логирование начала парсинга
+        if parse_type == "multiple_usernames":
+            chat_count = len([line for line in target.split('\n') if line.strip()])
+            self.log(f"Начинаю парсинг никнеймов из {chat_count} чатов (аккаунт: {account})")
+        else:
+            self.log(f"Начинаю парсинг: {parse_type} из {target} (аккаунт: {account})")
+        
         self.parse_progress.start()
         self.parse_status_var.set("Выполняется парсинг...")
         
@@ -571,6 +601,10 @@ class TelegramManagerGUI:
             'limit': limit,
             'export_format': export_format
         }
+        
+        # Для множественного парсинга добавляем лимит на чат
+        if parse_type == "multiple_usernames":
+            options['limit_per_chat'] = limit
         
         # Запуск парсинга в отдельном потоке
         def on_parse_complete():
@@ -586,6 +620,43 @@ class TelegramManagerGUI:
             self.root.after(0, on_parse_complete)
         
         threading.Thread(target=monitor_parsing, daemon=True).start()
+    
+    def on_parse_type_changed(self, event=None):
+        """Обработчик изменения типа парсинга"""
+        parse_type = self.parse_type_var.get()
+        
+        if parse_type == "multiple_usernames":
+            # Показываем текстовое поле для списка чатов
+            self.parse_target_entry.grid_remove()
+            self.parse_target_text.grid()
+            self.parse_target_label.config(text="Список чатов (по одному на строку):")
+            self.parse_limit_label.config(text="Лимит на чат:")
+            self.parse_limit_var.set("5000")
+            
+            # Добавляем подсказку в текстовое поле
+            self.parse_target_text.delete(1.0, tk.END)
+            self.parse_target_text.insert(1.0, "@chat1\n@chat2\nhttps://t.me/chat3\n...")
+        else:
+            # Показываем обычное поле ввода
+            self.parse_target_text.grid_remove()
+            self.parse_target_entry.grid()
+            
+            if parse_type == "usernames":
+                self.parse_target_label.config(text="Чат/канал для парсинга никнеймов:")
+                self.parse_limit_label.config(text="Лимит:")
+                self.parse_limit_var.set("10000")
+            elif parse_type == "members":
+                self.parse_target_label.config(text="Чат/канал для парсинга участников:")
+                self.parse_limit_label.config(text="Лимит:")
+                self.parse_limit_var.set("10000")
+            elif parse_type == "messages":
+                self.parse_target_label.config(text="Чат для парсинга сообщений:")
+                self.parse_limit_label.config(text="Лимит:")
+                self.parse_limit_var.set("1000")
+            elif parse_type == "dialogs":
+                self.parse_target_label.config(text="Аккаунт (игнорируется):")
+                self.parse_limit_label.config(text="Лимит:")
+                self.parse_limit_var.set("1000")
     
     def create_task(self):
         """Создание новой задачи"""
@@ -822,6 +893,10 @@ class TelegramManagerGUI:
         self.refresh_accounts()
         self.refresh_tasks()
         self.refresh_proxy_list()
+        self.refresh_export_files()
+        
+        # Инициализация интерфейса парсера
+        self.on_parse_type_changed()
         
         self.log("Приложение запущено")
         self.log(f"Загружено аккаунтов: {len(self.accounts)}")
